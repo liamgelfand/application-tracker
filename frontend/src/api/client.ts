@@ -148,9 +148,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  resetEmailAccount: (id: number) =>
+    request<{ message: string }>(`/email-accounts/${id}/reset`, { method: "POST" }),
   syncEmailAccount: (id: number) =>
-    request<{ ok: boolean; stats: Record<string, number> }>(
-      `/email-accounts/${id}/sync`,
+      request<{ ok: boolean; stats: Record<string, number> }>(
+        `/email-accounts/${id}/sync`,
       { method: "POST" }
     ),
 };

@@ -62,15 +62,35 @@ def sync_account(db: Session, account: EmailAccount) -> dict:
         if already:
             continue
 
+        logger.info(
+            "Analyzing uid=%s subject=%r from=%r", msg.uid, msg.subject, msg.sender
+        )
+
         is_job_related = False
+        llm_failed = False
         if llm_ready:
             try:
                 analysis = analyze_email(
                     db, sender=msg.sender, subject=msg.subject, body=msg.body
                 )
             except LLMError as exc:
-                logger.warning("LLM analysis failed for uid %s: %s", msg.uid, exc)
+                logger.warning(
+                    "LLM analysis failed for uid %s (%r): %s — will retry next sync",
+                    msg.uid, msg.subject, exc,
+                )
+                llm_failed = True
                 analysis = {}
+
+            if not llm_failed:
+                logger.info(
+                    "uid=%s → is_job_related=%s kind=%s confidence=%s summary=%r",
+                    msg.uid,
+                    analysis.get("is_job_related"),
+                    analysis.get("kind"),
+                    analysis.get("confidence"),
+                    analysis.get("summary"),
+                )
+
             if analysis.get("is_job_related"):
                 is_job_related = True
                 stats["job_related"] += 1
@@ -87,6 +107,10 @@ def sync_account(db: Session, account: EmailAccount) -> dict:
                     if auto_apply:
                         apply_suggestion(db, suggestion)
                         stats["applied"] += 1
+
+        # If the LLM failed, don't mark as processed — it will be retried next sync.
+        if llm_failed:
+            continue
 
         db.add(
             ProcessedEmail(

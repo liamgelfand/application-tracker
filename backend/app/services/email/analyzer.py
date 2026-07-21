@@ -10,11 +10,13 @@ from ..llm.service import complete_json
 
 SYSTEM_PROMPT = (
     "You are an assistant that helps track job applications by analyzing a single "
-    "email. Decide whether the email relates to a job application (application "
-    "confirmation, recruiter outreach, interview invite/scheduling, assessment, "
-    "offer, or rejection). If it does, try to match it to one of the user's existing "
-    "applications by company and role, and suggest an updated status. Be conservative: "
-    "if unsure whether it is job-related, say it is not."
+    "email. Decide whether the email relates to a job application. Job-related emails "
+    "include: application confirmations, recruiter outreach, interview invitations or "
+    "scheduling, take-home assessments, offers, rejections, and any follow-up from a "
+    "hiring team. When in doubt, flag it as job-related — it is far better to surface "
+    "a borderline email for review than to silently miss a real one. "
+    "If it does relate to a job application, try to match it to one of the user's "
+    "existing applications by company and role, and suggest an updated status."
 )
 
 VALID_STATUSES = [s.value for s in ApplicationStatus]

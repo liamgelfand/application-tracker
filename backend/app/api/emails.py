@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..core.security import decrypt, encrypt
 from ..db import get_db
-from ..models import EmailAccount
+from ..models import EmailAccount, ProcessedEmail
 from ..schemas import (
     ConnectionTestRequest,
     ConnectionTestResult,
@@ -79,6 +79,22 @@ def test_connection(payload: ConnectionTestRequest) -> ConnectionTestResult:
         folder=payload.folder,
     )
     return ConnectionTestResult(ok=ok, message=message)
+
+
+@router.post("/{account_id}/reset", response_model=MessageOut)
+def reset_processed(account_id: int, db: Session = Depends(get_db)) -> MessageOut:
+    """Clear the processed-email history for an account so the next sync re-analyzes all recent mail."""
+    account = db.get(EmailAccount, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    deleted = (
+        db.query(ProcessedEmail)
+        .filter(ProcessedEmail.account_id == account_id)
+        .delete()
+    )
+    account.last_seen_uid = None
+    db.commit()
+    return MessageOut(message=f"Reset {deleted} processed email(s). Next sync will re-analyze recent mail.")
 
 
 @router.post("/{account_id}/sync", response_model=dict)

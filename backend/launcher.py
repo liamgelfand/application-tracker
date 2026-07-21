@@ -101,10 +101,18 @@ def _enable_startup(port: int) -> None:
     script = str(HERE / "launcher.py")
 
     if system == "Windows":
+        # Prefer pythonw.exe — runs without a console window flash.
+        pythonw = Path(python).parent / "pythonw.exe"
+        exe = str(pythonw) if pythonw.exists() else python
+        work_dir = str(HERE)
         startup = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup"
         bat = startup / "AppTracker.bat"
+        # timeout gives Windows a few seconds to fully boot before the app starts.
         bat.write_text(
-            f'@echo off\nstart "" /B "{python}" "{script}" --port {port}\n',
+            f'@echo off\n'
+            f'timeout /t 8 /nobreak >nul\n'
+            f'cd /d "{work_dir}"\n'
+            f'start "" "{exe}" "{script}" --port {port}\n',
             encoding="utf-8",
         )
         logger.info("Start-on-login enabled (Windows startup folder).")

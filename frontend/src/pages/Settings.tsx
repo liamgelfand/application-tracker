@@ -343,6 +343,13 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ["suggestions"] });
     },
   });
+  const resetAccount = useMutation({
+    mutationFn: (id: number) => api.resetEmailAccount(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["emailAccounts"] });
+      queryClient.invalidateQueries({ queryKey: ["suggestions"] });
+    },
+  });
   const toggleAutoApply = useMutation({
     mutationFn: (value: boolean) =>
       api.updateSettings({ auto_apply_suggestions: value }),
@@ -477,6 +484,18 @@ export default function Settings() {
                       onClick={() => syncAccount.mutate(a.id)}
                     >
                       {syncAccount.isPending ? "Syncing..." : "Sync Now"}
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      title="Clear processed history and re-analyze recent mail. Use if an email was missed."
+                      disabled={resetAccount.isPending}
+                      onClick={() => {
+                        if (confirm("Re-analyze all recent mail for this inbox? This will re-run AI classification on emails already seen.")) {
+                          resetAccount.mutate(a.id);
+                        }
+                      }}
+                    >
+                      Re-analyze
                     </button>
                     <button
                       className="btn-danger"
