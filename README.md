@@ -62,50 +62,38 @@ frontend (React)  ->  backend (FastAPI)  ->  SQLite
 
 ## Quickstart
 
-### Option A: Docker (recommended)
-
-Requires Docker + Docker Compose.
+Requires **Python 3.11+** and **Node 18+**.
 
 ```bash
 git clone <your-repo-url> application-tracker
 cd application-tracker
-docker compose up --build
+make setup   # install backend + frontend dependencies (run once)
+make app     # build the frontend, then launch the tray app
 ```
 
-Then open http://localhost:8080.
+The app opens in your browser automatically and a tray icon appears.
+Right-click the tray icon to **Open**, enable **Start on Login**, or **Quit**.
 
-### Option B: Make (local dev)
+> **Windows note:** `make` isn't built in — install it with `winget install GnuWin32.Make` or use [Git Bash](https://gitforwindows.org/).  
+> Alternatively run the two commands manually:
+> ```powershell
+> cd frontend; npm run build; cd ..
+> backend\.venv\Scripts\python backend\launcher.py
+> ```
 
-Requires Python 3.11+, Node 18+, and `make`. (macOS/Linux have `make` built in; on Windows install it via `choco install make`, `winget install GnuWin32.Make`, or use WSL.)
+### For contributors (live reload)
 
 ```bash
-git clone <your-repo-url> application-tracker
-cd application-tracker
-make setup    # installs backend + frontend dependencies (run once)
-make dev      # runs the backend and frontend together
+make dev    # backend on :8000 + Vite dev server on :5173 simultaneously
 ```
 
-Then open http://localhost:5173. Run `make help` to see all available commands.
-
-### Option C: Manual
+### Docker
 
 ```bash
-# Backend
-cd backend
-python -m venv .venv
-# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+docker compose up --build   # available at http://localhost:8080
 ```
 
-```bash
-# Frontend (in a second terminal)
-cd frontend
-npm install
-npm run dev
-```
-
-Open http://localhost:5173. The Vite dev server proxies `/api` to the backend on port 8000.
+Run `make help` to see all available commands.
 
 ## First-time setup
 
