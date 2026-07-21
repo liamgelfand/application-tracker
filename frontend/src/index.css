@@ -39,7 +39,14 @@ a:hover {
   text-decoration: underline;
 }
 
-button {
+button,
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-family: inherit;
   cursor: pointer;
   border: none;
@@ -47,7 +54,14 @@ button {
   padding: 8px 14px;
   font-size: 14px;
   font-weight: 500;
+  text-decoration: none;
   transition: background 0.15s, opacity 0.15s;
+}
+.btn-primary:hover,
+.btn-secondary:hover,
+.btn-danger:hover,
+.btn-ghost:hover {
+  text-decoration: none;
 }
 
 .btn-primary {
