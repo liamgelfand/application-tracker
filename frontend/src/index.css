@@ -17,6 +17,17 @@
   box-sizing: border-box;
 }
 
+/* Hide scrollbars everywhere while keeping scroll behavior (wheel/trackpad/drag). */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge/IE */
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* Chrome/Safari/Edge */
+}
+
 html,
 body,
 #root {
@@ -192,6 +203,7 @@ label {
 }
 .content {
   flex: 1;
+  min-width: 0;
   padding: 28px 34px;
   max-width: 1400px;
   width: 100%;
@@ -231,14 +243,13 @@ label {
   padding-bottom: 12px;
 }
 .column {
-  min-width: 260px;
-  flex: 1;
+  flex: 0 0 280px;
   background: var(--bg-elevated);
   border-radius: var(--radius);
   padding: 12px;
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 160px);
+  max-height: calc(100vh - 220px);
 }
 .column-header {
   display: flex;
