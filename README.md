@@ -1,8 +1,37 @@
-# Job Application Tracker
+<p align="center">
+  <img src="docs/banner.png" alt="Job Application Tracker" width="100%" />
+</p>
 
-A self-hosted, open-source app for tracking your job applications end to end. It parses pasted job listings with AI, monitors your email inbox for application-related messages, and keeps every application organized on a kanban board with a full status timeline.
+<h1 align="center">Job Application Tracker</h1>
 
-Everything runs locally on your machine. Bring your own AI provider (OpenAI, Anthropic, Google Gemini, or a local Ollama model) and your own email account. No accounts, no servers, no cost.
+<p align="center">
+  <strong>Self-hosted, AI-powered job application tracker that reads your inbox.</strong><br />
+  Bring your own model — OpenAI, Claude, Gemini, or a local Ollama model. No accounts, no servers, no cost.
+</p>
+
+<p align="center">
+  <a href="#quickstart"><img src="https://img.shields.io/badge/setup-one%20command-6366f1" alt="One-command setup" /></a>
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
+  <img src="https://img.shields.io/badge/backend-FastAPI-009688" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/frontend-React-61dafb" alt="React" />
+  <img src="https://img.shields.io/badge/LLM-OpenAI%20%7C%20Claude%20%7C%20Gemini%20%7C%20Ollama-8b5cf6" alt="LLM providers" />
+</p>
+
+---
+
+Track your job search end to end. Paste a job listing and AI fills in the details; connect your email and it detects confirmations, interviews, and rejections and updates your board automatically. Everything runs locally on your machine.
+
+## Screenshots
+
+> Run `make dev`, then `cd backend && python -m scripts.seed_demo` to populate demo data and capture your own. Drop images into `docs/screenshots/` and reference them here.
+
+| Dashboard (kanban) | Paste-to-add |
+| --- | --- |
+| `docs/screenshots/dashboard.png` | `docs/screenshots/add.png` |
+
+| Review queue | Settings (providers) |
+| --- | --- |
+| `docs/screenshots/review.png` | `docs/screenshots/settings.png` |
 
 ## Features
 
