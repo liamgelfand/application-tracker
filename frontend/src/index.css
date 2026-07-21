@@ -488,3 +488,89 @@ tbody tr:hover {
 .switch-row input {
   width: auto;
 }
+
+/* Analytics */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stat-value {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.stat-label {
+  color: var(--text);
+  font-weight: 500;
+}
+.stat-hint {
+  font-size: 12px;
+}
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.bar-label {
+  width: 110px;
+  font-size: 13px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.bar-track {
+  flex: 1;
+  height: 12px;
+  background: var(--bg);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.3s ease;
+  min-width: 2px;
+}
+.bar-value {
+  width: 28px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+.week-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 180px;
+}
+.week-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+.week-bar-wrap {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.week-bar {
+  width: 60%;
+  min-height: 2px;
+  background: var(--primary);
+  border-radius: 4px 4px 0 0;
+  transition: height 0.3s ease;
+}
+.week-x {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}

@@ -95,3 +95,15 @@ export interface AppSettings {
   email_poll_interval_seconds: number;
   auto_apply_suggestions: boolean;
 }
+
+export interface Analytics {
+  total: number;
+  submitted: number;
+  active: number;
+  status_counts: Record<ApplicationStatus, number>;
+  response_rate: number;
+  interview_rate: number;
+  offer_rate: number;
+  avg_days_to_response: number | null;
+  over_time: { week: string; count: number }[];
+}

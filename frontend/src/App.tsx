@@ -4,6 +4,7 @@ import { api } from "./api/client";
 import Dashboard from "./pages/Dashboard";
 import AddApplication from "./pages/AddApplication";
 import ApplicationDetail from "./pages/ApplicationDetail";
+import Analytics from "./pages/Analytics";
 import ReviewQueue from "./pages/ReviewQueue";
 import Settings from "./pages/Settings";
 
@@ -25,6 +26,9 @@ function Sidebar() {
       </NavLink>
       <NavLink to="/add" className="nav-link">
         Add Application
+      </NavLink>
+      <NavLink to="/analytics" className="nav-link">
+        Analytics
       </NavLink>
       <NavLink to="/review" className="nav-link">
         Review Queue
@@ -54,6 +58,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/add" element={<AddApplication />} />
+          <Route path="/analytics" element={<Analytics />} />
           <Route path="/applications/:id" element={<ApplicationDetail />} />
           <Route path="/review" element={<ReviewQueue />} />
           <Route path="/settings" element={<Settings />} />

@@ -1,4 +1,5 @@
 import type {
+  Analytics,
   AppSettings,
   Application,
   ApplicationDetail,
@@ -58,6 +59,9 @@ export const api = {
     }),
   deleteApplication: (id: number) =>
     request<{ message: string }>(`/applications/${id}`, { method: "DELETE" }),
+
+  // Analytics
+  getAnalytics: () => request<Analytics>("/analytics"),
 
   // Parse
   parseJob: (text: string) =>

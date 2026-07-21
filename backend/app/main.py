@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import applications, emails, parse, settings, suggestions
+from .api import analytics, applications, emails, parse, settings, suggestions
 from .config import settings as app_settings
 from .db import SessionLocal, init_db
 from .scheduler import shutdown as shutdown_scheduler
@@ -43,6 +43,7 @@ app.add_middleware(
 )
 
 app.include_router(applications.router)
+app.include_router(analytics.router)
 app.include_router(parse.router)
 app.include_router(emails.router)
 app.include_router(suggestions.router)
