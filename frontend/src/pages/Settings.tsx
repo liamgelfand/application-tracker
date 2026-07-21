@@ -344,7 +344,10 @@ export default function Settings() {
     },
   });
   const resetAccount = useMutation({
-    mutationFn: (id: number) => api.resetEmailAccount(id),
+    mutationFn: async (id: number) => {
+      await api.resetEmailAccount(id);
+      return api.syncEmailAccount(id);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["emailAccounts"] });
       queryClient.invalidateQueries({ queryKey: ["suggestions"] });

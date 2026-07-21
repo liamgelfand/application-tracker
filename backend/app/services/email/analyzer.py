@@ -46,8 +46,13 @@ Respond with ONLY a JSON object using exactly these keys:
 
 Guidance:
 - If it matches an existing application and implies a status change, use kind="status_change" with application_id and suggested_status.
-- If it is a job application confirmation for a role NOT in the list, use kind="new_application" with company/title and suggested_status="applied".
-- If job-related but no clear action, use kind="note".
+- If it relates to a job at a company/role NOT already in the list, use kind="new_application" with company/title and the most appropriate suggested_status:
+    - Application confirmation or "we received your application" → suggested_status="applied"
+    - Interview invite or scheduling → suggested_status="interview"
+    - Offer letter or verbal offer → suggested_status="offer"
+    - Rejection or "we've decided to move forward with other candidates" → suggested_status="rejected"
+    - Recruiter cold outreach (not yet applied) → suggested_status="saved"
+- If job-related but no clear action (e.g. a generic newsletter or vague follow-up), use kind="note".
 - If not job-related, set is_job_related=false and kind=null.
 """
 
