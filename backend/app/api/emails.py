@@ -83,36 +83,18 @@ def test_connection(payload: ConnectionTestRequest) -> ConnectionTestResult:
 
 @router.post("/{account_id}/reset", response_model=MessageOut)
 def reset_processed(account_id: int, db: Session = Depends(get_db)) -> MessageOut:
-    """Roll back the last 10 processed emails so the next sync re-analyzes only recent mail."""
+    """Clear the processed-email history for an account so the next sync re-analyzes all recent mail."""
     account = db.get(EmailAccount, account_id)
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
-
-    # Find the 10 most recently processed emails ordered by UID descending.
-    recent = (
+    deleted = (
         db.query(ProcessedEmail)
         .filter(ProcessedEmail.account_id == account_id)
-        .order_by(ProcessedEmail.message_uid.desc())
-        .limit(10)
-        .all()
+        .delete()
     )
-
-    if not recent:
-        return MessageOut(message="No processed emails to reset.")
-
-    ids = [r.id for r in recent]
-    uids = [int(r.message_uid) for r in recent if r.message_uid and r.message_uid.isdigit()]
-
-    db.query(ProcessedEmail).filter(ProcessedEmail.id.in_(ids)).delete(
-        synchronize_session=False
-    )
-
-    # Roll last_seen_uid back to just before the oldest of the deleted emails.
-    if uids:
-        account.last_seen_uid = min(uids) - 1 if min(uids) > 0 else None
-
+    account.last_seen_uid = None
     db.commit()
-    return MessageOut(message=f"Reset {len(ids)} recent email(s). Next sync will re-analyze them.")
+    return MessageOut(message=f"Reset {deleted} processed email(s). Next sync will re-analyze recent mail.")
 
 
 @router.post("/{account_id}/sync", response_model=dict)
