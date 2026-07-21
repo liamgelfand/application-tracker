@@ -2,16 +2,30 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import type { Application } from "../api/types";
+import type { Application, ApplicationStatus } from "../api/types";
 import { STATUSES, STATUS_COLORS, STATUS_LABELS } from "../lib/statuses";
 import StatusBadge from "../components/StatusBadge";
 
 type View = "board" | "table";
 
-function AppCard({ app }: { app: Application }) {
+function AppCard({
+  app,
+  onDragStart,
+}: {
+  app: Application;
+  onDragStart: (id: number) => void;
+}) {
   const navigate = useNavigate();
   return (
-    <div className="app-card" onClick={() => navigate(`/applications/${app.id}`)}>
+    <div
+      className="app-card"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart(app.id);
+      }}
+      onClick={() => navigate(`/applications/${app.id}`)}
+    >
       <h4>{app.title}</h4>
       <div className="company">{app.company}</div>
       {(app.location || app.salary) && (
@@ -35,6 +49,29 @@ export default function Dashboard() {
     queryKey: ["applications", search],
     queryFn: () => api.listApplications({ search: search || undefined }),
   });
+
+  const draggedId = useRef<number | null>(null);
+  const [dragOver, setDragOver] = useState<ApplicationStatus | null>(null);
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: ApplicationStatus }) =>
+      api.updateStatus(id, status),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["applications"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    },
+  });
+
+  const handleDrop = (status: ApplicationStatus) => {
+    const id = draggedId.current;
+    setDragOver(null);
+    draggedId.current = null;
+    if (id == null) return;
+    const app = apps.find((a) => a.id === id);
+    if (app && app.status !== status) {
+      statusMutation.mutate({ id, status });
+    }
+  };
 
   const importMutation = useMutation({
     mutationFn: (file: File) => api.importApplications(file),
@@ -134,7 +171,19 @@ export default function Dashboard() {
           {STATUSES.map((status) => {
             const items = byStatus(status);
             return (
-              <div className="column" key={status}>
+              <div
+                className={`column ${dragOver === status ? "column-dragover" : ""}`}
+                key={status}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (dragOver !== status) setDragOver(status);
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node))
+                    setDragOver((s) => (s === status ? null : s));
+                }}
+                onDrop={() => handleDrop(status)}
+              >
                 <div className="column-header">
                   <span
                     className="status-dot"
@@ -145,7 +194,11 @@ export default function Dashboard() {
                 </div>
                 <div className="column-body">
                   {items.map((app) => (
-                    <AppCard key={app.id} app={app} />
+                    <AppCard
+                      key={app.id}
+                      app={app}
+                      onDragStart={(id) => (draggedId.current = id)}
+                    />
                   ))}
                 </div>
               </div>

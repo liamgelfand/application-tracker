@@ -281,6 +281,31 @@ function EmailModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function NotificationToggle() {
+  const supported = typeof Notification !== "undefined";
+  const [permission, setPermission] = useState(
+    supported ? Notification.permission : "denied"
+  );
+
+  if (!supported) {
+    return <span className="muted">Not supported</span>;
+  }
+  if (permission === "granted") {
+    return <span className="badge">Enabled</span>;
+  }
+  if (permission === "denied") {
+    return <span className="muted">Blocked in browser</span>;
+  }
+  return (
+    <button
+      className="btn-secondary"
+      onClick={async () => setPermission(await Notification.requestPermission())}
+    >
+      Enable
+    </button>
+  );
+}
+
 export default function Settings() {
   const queryClient = useQueryClient();
   const [showProviderModal, setShowProviderModal] = useState(false);
@@ -470,6 +495,17 @@ export default function Settings() {
       {/* Preferences */}
       <div className="card">
         <strong>Preferences</strong>
+        <div className="flex-between" style={{ marginTop: 14 }}>
+          <div>
+            <div>Desktop notifications</div>
+            <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
+              Get a browser notification when new job emails land in the review
+              queue.
+            </p>
+          </div>
+          <NotificationToggle />
+        </div>
+        <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "16px 0 0" }} />
         <div className="flex-between" style={{ marginTop: 14 }}>
           <div>
             <div>Auto-apply email suggestions</div>

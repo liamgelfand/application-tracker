@@ -250,8 +250,16 @@ label {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
-  cursor: pointer;
+  cursor: grab;
   transition: border-color 0.15s, transform 0.1s;
+}
+.app-card:active {
+  cursor: grabbing;
+}
+.column-dragover {
+  outline: 2px dashed var(--primary);
+  outline-offset: -2px;
+  background: rgba(99, 102, 241, 0.08);
 }
 .app-card:hover {
   border-color: var(--primary);

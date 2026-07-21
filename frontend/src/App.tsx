@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api/client";
@@ -15,6 +16,23 @@ function Sidebar() {
     refetchInterval: 60000,
   });
   const pendingCount = suggestions?.length ?? 0;
+
+  // Notify when new email-detected suggestions appear.
+  const prevCount = useRef<number | null>(null);
+  useEffect(() => {
+    if (prevCount.current !== null && pendingCount > prevCount.current) {
+      const delta = pendingCount - prevCount.current;
+      if (
+        typeof Notification !== "undefined" &&
+        Notification.permission === "granted"
+      ) {
+        new Notification("Job Application Tracker", {
+          body: `${delta} new job email${delta === 1 ? "" : "s"} to review.`,
+        });
+      }
+    }
+    prevCount.current = pendingCount;
+  }, [pendingCount]);
 
   return (
     <aside className="sidebar">
