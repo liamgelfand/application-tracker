@@ -17,15 +17,15 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: backend/requirements-dev.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
       - name: Byte-compile
         run: python -m compileall app
-      - name: Import smoke test
-        run: python -c "from app.main import app; print('import ok')"
+      - name: Run tests
+        run: pytest
 
   frontend:
     runs-on: ubuntu-latest
@@ -41,5 +41,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Run tests
+        run: npm run test
       - name: Build
         run: npm run build

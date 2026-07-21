@@ -136,6 +136,21 @@ Backend settings are read from environment variables or a `backend/.env` file (s
 - API keys and email passwords are encrypted at rest using a key stored in `DATA_DIR/secret.key`. Keep that file (and your `data/` directory) private and backed up. If you lose the key, stored secrets can't be decrypted.
 - Your email/API credentials never leave your machine except to talk to the providers you configure.
 
+## Testing
+
+```bash
+# Backend (pytest)
+cd backend
+pip install -r requirements-dev.txt
+pytest
+
+# Frontend (vitest)
+cd frontend
+npm run test
+```
+
+Both suites also run automatically in CI on every push and pull request.
+
 ## API
 
 Interactive API docs are available at http://localhost:8000/docs when the backend is running.
