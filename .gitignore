@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# Backend runtime data (DB + encryption key + secrets).
+# The data dir location depends on where the app is launched from, so ignore
+# it everywhere, plus the DB/key files by extension as a safety net.
+data/
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+*.key
+.env
+.env.*
+!.env.example
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/dist-types/
+*.tsbuildinfo
+*.local
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

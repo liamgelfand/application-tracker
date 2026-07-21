@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+
+from sqlalchemy.orm import Session
+
+from ..models import (
+    Application,
+    ApplicationStatus,
+    EventSource,
+    StatusEvent,
+    Suggestion,
+    SuggestionKind,
+    SuggestionStatus,
+)
+
+
+def _coerce_status(value: str | None) -> ApplicationStatus | None:
+    if not value:
+        return None
+    try:
+        return ApplicationStatus(value)
+    except ValueError:
+        return None
+
+
+def build_suggestion_from_analysis(
+    analysis: dict,
+    *,
+    sender: str,
+    subject: str,
+    snippet: str,
+) -> Suggestion | None:
+    """Turn an analyzer result into a pending Suggestion (or None if not relevant)."""
+    if not analysis.get("is_job_related"):
+        return None
+
+    kind_raw = analysis.get("kind")
+    try:
+        kind = SuggestionKind(kind_raw) if kind_raw else SuggestionKind.note
+    except ValueError:
+        kind = SuggestionKind.note
+
+    suggested_status = _coerce_status(analysis.get("suggested_status"))
+    payload = {
+        "company": analysis.get("company"),
+        "title": analysis.get("title"),
+    }
+
+    return Suggestion(
+        application_id=analysis.get("application_id"),
+        kind=kind,
+        status=SuggestionStatus.pending,
+        suggested_status=suggested_status,
+        summary=analysis.get("summary"),
+        payload=json.dumps(payload),
+        confidence=analysis.get("confidence"),
+        email_subject=subject,
+        email_sender=sender,
+        email_snippet=snippet[:500],
+    )
+
+
+def apply_suggestion(
+    db: Session, suggestion: Suggestion, *, source: EventSource = EventSource.email
+) -> Application | None:
+    """Apply a suggestion's change. Returns the affected application (if any)."""
+    app: Application | None = None
+
+    if suggestion.kind == SuggestionKind.new_application:
+        payload = json.loads(suggestion.payload) if suggestion.payload else {}
+        app = Application(
+            company=payload.get("company") or "Unknown",
+            title=payload.get("title") or "Unknown",
+            status=suggestion.suggested_status or ApplicationStatus.applied,
+            source="email",
+            date_applied=datetime.now(timezone.utc),
+        )
+        db.add(app)
+        db.flush()
+        db.add(
+            StatusEvent(
+                application_id=app.id,
+                from_status=None,
+                to_status=app.status,
+                note=suggestion.summary or "Created from email",
+                source=source,
+            )
+        )
+    elif suggestion.application_id:
+        app = db.get(Application, suggestion.application_id)
+        if app is not None:
+            if (
+                suggestion.kind == SuggestionKind.status_change
+                and suggestion.suggested_status
+                and suggestion.suggested_status != app.status
+            ):
+                old = app.status
+                app.status = suggestion.suggested_status
+                db.add(
+                    StatusEvent(
+                        application_id=app.id,
+                        from_status=old,
+                        to_status=app.status,
+                        note=suggestion.summary or "Updated from email",
+                        source=source,
+                    )
+                )
+            else:
+                db.add(
+                    StatusEvent(
+                        application_id=app.id,
+                        from_status=app.status,
+                        to_status=app.status,
+                        note=suggestion.summary or "Email note",
+                        source=source,
+                    )
+                )
+
+    suggestion.status = SuggestionStatus.approved
+    db.commit()
+    return app

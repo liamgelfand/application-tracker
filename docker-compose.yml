@@ -1,0 +1,21 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      DATA_DIR: /data
+      FRONTEND_ORIGIN: http://localhost:8080
+      EMAIL_POLL_INTERVAL_SECONDS: "300"
+    volumes:
+      - tracker-data:/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  tracker-data:
