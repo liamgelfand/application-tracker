@@ -37,8 +37,12 @@ Track your job search end to end. Paste a job listing and AI fills in the detail
 
 - **Kanban board + table** to track applications across stages: Saved, Applied, Phone Screen, Interview, Offer, Rejected, Ghosted, Accepted.
 - **Paste-to-add**: paste any job listing and an LLM extracts the company, title, location, salary, URL, skills, and a summary. Review, then save.
+- **Browser extension**: capture the job listing on the page you're viewing in one click (see [`extension/`](extension/)).
 - **Inbox monitoring (IMAP)**: connect any email provider. A background job reads new mail, detects job-related messages (confirmations, recruiter outreach, interview invites, rejections), matches them to your applications, and proposes updates.
 - **Review queue**: proposed changes wait for your approval by default (flip on auto-apply if you trust it).
+- **Drag-and-drop board** plus **desktop notifications** when new job emails need review.
+- **Analytics**: response rate, interview rate, offer rate, average days to response, and applications-per-week.
+- **CSV / JSON import and export** so you can bring in an existing spreadsheet or back up your data.
 - **Multiple AI providers, toggleable**: configure several providers with their own keys and models, and switch the active one anytime. Local models via Ollama are fully supported.
 - **Per-application timeline** recording every status change and email event.
 - **Secrets encrypted at rest**: API keys and email passwords are encrypted with a locally generated key.
@@ -123,7 +127,7 @@ Backend settings are read from environment variables or a `backend/.env` file (s
 | --- | --- | --- |
 | `DATA_DIR` | `./data` | Where the SQLite DB and encryption key live. |
 | `FRONTEND_ORIGIN` | `http://localhost:5173` | Allowed CORS origin. |
-| `EMAIL_POLL_INTERVAL_SECONDS` | `300` | How often inboxes are polled. |
+| `EMAIL_POLL_INTERVAL_SECONDS` | `900` | Default inbox poll interval (changeable in Settings). |
 | `APP_SECRET_KEY` | auto-generated | Override the encryption key (base64 urlsafe, 32 bytes). |
 
 ## Security notes
@@ -138,16 +142,17 @@ Interactive API docs are available at http://localhost:8000/docs when the backen
 
 ## Roadmap / ideas
 
-- Browser extension / bookmarklet to capture the current job page in one click.
-- Analytics: application funnel, response rate, time-to-response.
 - Follow-up reminders and interview calendar (.ics) export.
-- CSV / JSON import and export.
 - Resume-tailoring suggestions per listing.
+- Notifications to Slack/Discord/email in addition to desktop.
 - Optional authentication for hosted deployments.
+- Firefox build of the browser extension.
+
+Done so far: browser extension, analytics dashboard, CSV/JSON import & export, drag-and-drop board, desktop notifications.
 
 ## Contributing
 
-Issues and pull requests are welcome. This project is intentionally simple to fork and extend.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines. This project is intentionally simple to fork and extend.
 
 ## License
 

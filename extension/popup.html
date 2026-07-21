@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>Capture job</title>
+  </head>
+  <body>
+    <div class="header">
+      <img src="icon.png" width="20" height="20" alt="" />
+      <span>Capture Job Listing</span>
+    </div>
+
+    <div id="status" class="status hidden"></div>
+
+    <button id="capture" class="btn primary">Capture this page</button>
+
+    <div id="preview" class="preview hidden">
+      <label>Company</label>
+      <input id="company" type="text" />
+      <label>Title</label>
+      <input id="title" type="text" />
+      <label>Location</label>
+      <input id="location" type="text" />
+      <label>Salary</label>
+      <input id="salary" type="text" />
+      <div class="actions">
+        <button id="save" class="btn primary">Save to Tracker</button>
+      </div>
+    </div>
+
+    <div class="footer">
+      <a id="openApp" href="#" target="_blank">Open tracker</a>
+      <a id="openOptions" href="#">Settings</a>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
