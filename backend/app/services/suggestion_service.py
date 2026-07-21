@@ -117,6 +117,57 @@ def apply_suggestion(
                         source=source,
                     )
                 )
+        else:
+            # application_id pointed to a non-existent row — fall back to
+            # creating a new application if we have enough info.
+            payload = json.loads(suggestion.payload) if suggestion.payload else {}
+            company = payload.get("company")
+            title = payload.get("title")
+            if company or title:
+                app = Application(
+                    company=company or "Unknown",
+                    title=title or "Unknown",
+                    status=suggestion.suggested_status or ApplicationStatus.applied,
+                    source="email",
+                    date_applied=datetime.now(timezone.utc),
+                )
+                db.add(app)
+                db.flush()
+                db.add(
+                    StatusEvent(
+                        application_id=app.id,
+                        from_status=None,
+                        to_status=app.status,
+                        note=suggestion.summary or "Created from email",
+                        source=source,
+                    )
+                )
+    else:
+        # No application_id at all — the LLM returned status_change without
+        # matching an existing entry. Create a new application if we have
+        # company/title in the payload.
+        payload = json.loads(suggestion.payload) if suggestion.payload else {}
+        company = payload.get("company")
+        title = payload.get("title")
+        if company or title:
+            app = Application(
+                company=company or "Unknown",
+                title=title or "Unknown",
+                status=suggestion.suggested_status or ApplicationStatus.applied,
+                source="email",
+                date_applied=datetime.now(timezone.utc),
+            )
+            db.add(app)
+            db.flush()
+            db.add(
+                StatusEvent(
+                    application_id=app.id,
+                    from_status=None,
+                    to_status=app.status,
+                    note=suggestion.summary or "Created from email",
+                    source=source,
+                )
+            )
 
     suggestion.status = SuggestionStatus.approved
     db.commit()

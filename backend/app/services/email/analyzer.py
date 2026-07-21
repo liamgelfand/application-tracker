@@ -45,8 +45,8 @@ Respond with ONLY a JSON object using exactly these keys:
 }}
 
 Guidance:
-- If it matches an existing application and implies a status change, use kind="status_change" with application_id and suggested_status.
-- If it relates to a job at a company/role NOT already in the list, use kind="new_application" with company/title and the most appropriate suggested_status:
+- If it clearly matches an existing application (same company AND similar role) and implies a status change, use kind="status_change" with the matching application_id and suggested_status. Only use an application_id from the list above — never invent one.
+- If the company or role is NOT in the list, you MUST use kind="new_application" (never status_change) with company/title and the most appropriate suggested_status:
     - Application confirmation or "we received your application" → suggested_status="applied"
     - Interview invite or scheduling → suggested_status="interview"
     - Offer letter or verbal offer → suggested_status="offer"
