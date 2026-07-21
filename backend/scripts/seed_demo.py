@@ -14,11 +14,14 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta, timezone
 
+from app.core.security import encrypt
 from app.db import SessionLocal, init_db
 from app.models import (
     Application,
     ApplicationStatus,
+    EmailAccount,
     EventSource,
+    LLMProvider,
     StatusEvent,
     Suggestion,
     SuggestionKind,
@@ -111,6 +114,37 @@ def reset(db) -> None:
     db.commit()
 
 
+def seed_settings(db) -> None:
+    """Add a demo provider + inbox so the Settings page looks realistic.
+
+    These are only added when none exist, so this never clobbers real config.
+    """
+    if db.query(LLMProvider).count() == 0:
+        db.add(
+            LLMProvider(
+                name="Qwen 2.5 (local)",
+                provider="ollama",
+                model="qwen2.5:7b",
+                api_base="http://localhost:11434",
+                is_active=True,
+            )
+        )
+    if db.query(EmailAccount).count() == 0:
+        db.add(
+            EmailAccount(
+                name="Personal Gmail",
+                imap_host="imap.gmail.com",
+                imap_port=993,
+                username="you@gmail.com",
+                password_encrypted=encrypt("demo-app-password"),
+                use_ssl=True,
+                folder="INBOX",
+                active=True,
+            )
+        )
+    db.commit()
+
+
 def seed(db) -> None:
     created: list[Application] = []
     for i, data in enumerate(DEMO_APPS):
@@ -191,6 +225,7 @@ def main() -> None:
             reset(db)
             print("Cleared existing applications, suggestions, and events.")
         seed(db)
+        seed_settings(db)
     finally:
         db.close()
 

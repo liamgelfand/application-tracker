@@ -23,15 +23,15 @@ Track your job search end to end. Paste a job listing and AI fills in the detail
 
 ## Screenshots
 
-> Run `make dev`, then `cd backend && python -m scripts.seed_demo` to populate demo data and capture your own. Drop images into `docs/screenshots/` and reference them here.
-
-| Dashboard (kanban) | Paste-to-add |
+| Dashboard (kanban board) | Analytics |
 | --- | --- |
-| `docs/screenshots/dashboard.png` | `docs/screenshots/add.png` |
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Analytics](docs/screenshots/analytics.png) |
 
-| Review queue | Settings (providers) |
+| Review queue | Settings |
 | --- | --- |
-| `docs/screenshots/review.png` | `docs/screenshots/settings.png` |
+| ![Review queue](docs/screenshots/review.png) | ![Settings](docs/screenshots/settings.png) |
+
+> Want to regenerate these? Run `cd backend && python -m scripts.seed_demo --reset` to load demo data, then `make dev` and capture the screens.
 
 ## Features
 
