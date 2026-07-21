@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { Application } from "../api/types";
@@ -27,11 +27,30 @@ export default function Dashboard() {
   const [view, setView] = useState<View>("board");
   const [search, setSearch] = useState("");
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
 
   const { data: apps = [], isLoading } = useQuery({
     queryKey: ["applications", search],
     queryFn: () => api.listApplications({ search: search || undefined }),
   });
+
+  const importMutation = useMutation({
+    mutationFn: (file: File) => api.importApplications(file),
+    onSuccess: (res) => {
+      setImportMsg(res.message);
+      queryClient.invalidateQueries({ queryKey: ["applications"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    },
+    onError: (e: Error) => setImportMsg(e.message),
+  });
+
+  const onImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) importMutation.mutate(file);
+    e.target.value = "";
+  };
 
   const byStatus = (status: string) => apps.filter((a) => a.status === status);
 
@@ -44,10 +63,38 @@ export default function Dashboard() {
             {apps.length} application{apps.length === 1 ? "" : "s"} tracked
           </p>
         </div>
-        <button className="btn-primary" onClick={() => navigate("/add")}>
-          + Add Application
-        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <a className="btn-secondary" href={api.exportUrl("csv")}>
+            Export CSV
+          </a>
+          <a className="btn-secondary" href={api.exportUrl("json")}>
+            Export JSON
+          </a>
+          <button
+            className="btn-secondary"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importMutation.isPending}
+          >
+            {importMutation.isPending ? "Importing..." : "Import"}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.json"
+            style={{ display: "none" }}
+            onChange={onImportFile}
+          />
+          <button className="btn-primary" onClick={() => navigate("/add")}>
+            + Add Application
+          </button>
+        </div>
       </div>
+
+      {importMsg && (
+        <div className="alert alert-info" onAnimationEnd={() => setImportMsg(null)}>
+          {importMsg}
+        </div>
+      )}
 
       <div className="toolbar">
         <input

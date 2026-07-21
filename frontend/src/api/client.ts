@@ -59,6 +59,26 @@ export const api = {
     }),
   deleteApplication: (id: number) =>
     request<{ message: string }>(`/applications/${id}`, { method: "DELETE" }),
+  exportUrl: (format: "csv" | "json") =>
+    `${BASE}/applications/export?format=${format}`,
+  importApplications: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/applications/import`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        detail = (await res.json()).detail || detail;
+      } catch {
+        // ignore
+      }
+      throw new Error(detail);
+    }
+    return res.json() as Promise<{ message: string }>;
+  },
 
   // Analytics
   getAnalytics: () => request<Analytics>("/analytics"),
