@@ -233,7 +233,7 @@ def main() -> None:
     server = _ServerThread(port)
     server.start()
 
-    # Wait up to 5 s for the server to be ready before opening the browser.
+    # Wait up to 5 s for the server to be ready.
     for _ in range(50):
         time.sleep(0.1)
         try:
@@ -242,8 +242,6 @@ def main() -> None:
             break
         except Exception:
             continue
-
-    webbrowser.open(url)
 
     if not _TRAY_AVAILABLE or args.no_tray:
         logger.info("App running at %s  (Ctrl+C to quit)", url)
