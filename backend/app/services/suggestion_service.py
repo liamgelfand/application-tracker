@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -14,6 +15,20 @@ from ..models import (
     SuggestionKind,
     SuggestionStatus,
 )
+
+
+def _company_from_sender(sender: str | None) -> str | None:
+    """Extract a human-readable company name from an email From header."""
+    if not sender:
+        return None
+    # "Appian Recruiting <careers@appian.com>" → "Appian Recruiting"
+    m = re.match(r"^(.+?)\s*<", sender)
+    if m:
+        return m.group(1).strip()
+    # "careers@appian.com" → "appian"
+    if "@" in sender:
+        return sender.split("@")[1].split(".")[0].capitalize()
+    return sender.strip() or None
 
 
 def _coerce_status(value: str | None) -> ApplicationStatus | None:
@@ -118,38 +133,10 @@ def apply_suggestion(
                     )
                 )
         else:
-            # application_id pointed to a non-existent row — fall back to
-            # creating a new application if we have enough info.
+            # application_id pointed to a non-existent row — create a new entry.
             payload = json.loads(suggestion.payload) if suggestion.payload else {}
-            company = payload.get("company")
+            company = payload.get("company") or _company_from_sender(suggestion.email_sender)
             title = payload.get("title")
-            if company or title:
-                app = Application(
-                    company=company or "Unknown",
-                    title=title or "Unknown",
-                    status=suggestion.suggested_status or ApplicationStatus.applied,
-                    source="email",
-                    date_applied=datetime.now(timezone.utc),
-                )
-                db.add(app)
-                db.flush()
-                db.add(
-                    StatusEvent(
-                        application_id=app.id,
-                        from_status=None,
-                        to_status=app.status,
-                        note=suggestion.summary or "Created from email",
-                        source=source,
-                    )
-                )
-    else:
-        # No application_id at all — the LLM returned status_change without
-        # matching an existing entry. Create a new application if we have
-        # company/title in the payload.
-        payload = json.loads(suggestion.payload) if suggestion.payload else {}
-        company = payload.get("company")
-        title = payload.get("title")
-        if company or title:
             app = Application(
                 company=company or "Unknown",
                 title=title or "Unknown",
@@ -168,6 +155,30 @@ def apply_suggestion(
                     source=source,
                 )
             )
+    else:
+        # No application_id — LLM used status_change for an unknown company.
+        # Always create a new entry, using sender name as company fallback.
+        payload = json.loads(suggestion.payload) if suggestion.payload else {}
+        company = payload.get("company") or _company_from_sender(suggestion.email_sender)
+        title = payload.get("title")
+        app = Application(
+            company=company or "Unknown",
+            title=title or "Unknown",
+            status=suggestion.suggested_status or ApplicationStatus.applied,
+            source="email",
+            date_applied=datetime.now(timezone.utc),
+        )
+        db.add(app)
+        db.flush()
+        db.add(
+            StatusEvent(
+                application_id=app.id,
+                from_status=None,
+                to_status=app.status,
+                note=suggestion.summary or "Created from email",
+                source=source,
+            )
+        )
 
     suggestion.status = SuggestionStatus.approved
     db.commit()
