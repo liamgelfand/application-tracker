@@ -8,13 +8,11 @@ Usage:
 What it does:
   1. Builds the frontend if frontend/dist is missing.
   2. Starts the FastAPI/uvicorn server in a background thread.
-  3. Opens the app in your default browser.
-  4. Shows a tray icon with Open / Start on Login / Quit options.
+  3. Shows a tray icon with Open / Start on Login / Quit options.
 """
 from __future__ import annotations
 
 import argparse
-import io
 import logging
 import os
 import platform
@@ -22,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import webbrowser
 from pathlib import Path
 
@@ -36,6 +35,13 @@ HERE = Path(__file__).parent          # backend/
 ROOT = HERE.parent                    # project root
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 FRONTEND_DIR = ROOT / "frontend"
+LOG_DIR = HERE / "data"
+LOG_FILE = LOG_DIR / "launcher.log"
+
+# Windows Startup entries
+_WIN_STARTUP = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup"
+_WIN_STARTUP_BAT = _WIN_STARTUP / "AppTracker.bat"
+_WIN_STARTUP_VBS = _WIN_STARTUP / "AppTracker.vbs"
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +58,28 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _configure_logging() -> None:
+    """Log to console when available, and always to a file (pythonw has no console)."""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    if not any(isinstance(h, logging.FileHandler) for h in root.handlers):
+        fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+        fh.setFormatter(fmt)
+        root.addHandler(fh)
+
+    # Avoid duplicate StreamHandlers if main() is re-entered.
+    if sys.stderr is not None and not any(
+        isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+        for h in root.handlers
+    ):
+        sh = logging.StreamHandler()
+        sh.setFormatter(fmt)
+        root.addHandler(sh)
+
 
 def _build_frontend() -> None:
     """Run `npm run build` inside frontend/ if dist is absent."""
@@ -82,11 +110,22 @@ def _make_tray_icon() -> "Image.Image":
     return img
 
 
+def _wait_for_health(url: str, timeout_s: float = 15.0) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            import urllib.request
+            urllib.request.urlopen(f"{url}/api/health", timeout=1)
+            return True
+        except Exception:
+            time.sleep(0.2)
+    return False
+
+
 def _is_startup_enabled() -> bool:
     system = platform.system()
     if system == "Windows":
-        startup = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup"
-        return (startup / "AppTracker.bat").exists()
+        return _WIN_STARTUP_VBS.exists() or _WIN_STARTUP_BAT.exists()
     if system == "Darwin":
         plist = Path.home() / "Library/LaunchAgents/com.apptracker.launcher.plist"
         return plist.exists()
@@ -101,21 +140,24 @@ def _enable_startup(port: int) -> None:
     script = str(HERE / "launcher.py")
 
     if system == "Windows":
-        # Prefer pythonw.exe — runs without a console window flash.
+        # Prefer pythonw.exe — no console window.
         pythonw = Path(python).parent / "pythonw.exe"
         exe = str(pythonw) if pythonw.exists() else python
         work_dir = str(HERE)
-        startup = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup"
-        bat = startup / "AppTracker.bat"
-        # timeout gives Windows a few seconds to fully boot before the app starts.
-        bat.write_text(
-            f'@echo off\n'
-            f'timeout /t 8 /nobreak >nul\n'
-            f'cd /d "{work_dir}"\n'
-            f'start "" "{exe}" "{script}" --port {port}\n',
-            encoding="utf-8",
+
+        # VBScript launches hidden (window style 0) so no cmd flash on login.
+        # Delay a few seconds so OneDrive / network paths are ready.
+        vbs = (
+            'Set sh = CreateObject("WScript.Shell")\r\n'
+            f'sh.CurrentDirectory = "{work_dir}"\r\n'
+            "WScript.Sleep 8000\r\n"
+            f'sh.Run """{exe}"" ""{script}"" --port {port}", 0, False\r\n'
         )
-        logger.info("Start-on-login enabled (Windows startup folder).")
+        _WIN_STARTUP.mkdir(parents=True, exist_ok=True)
+        _WIN_STARTUP_VBS.write_text(vbs, encoding="utf-8")
+        # Remove the old .bat that flashed a console window.
+        _WIN_STARTUP_BAT.unlink(missing_ok=True)
+        logger.info("Start-on-login enabled (Windows Startup VBScript, silent).")
 
     elif system == "Darwin":
         agents = Path.home() / "Library/LaunchAgents"
@@ -169,11 +211,8 @@ WantedBy=default.target
 def _disable_startup() -> None:
     system = platform.system()
     if system == "Windows":
-        bat = (
-            Path(os.environ.get("APPDATA", ""))
-            / "Microsoft/Windows/Start Menu/Programs/Startup/AppTracker.bat"
-        )
-        bat.unlink(missing_ok=True)
+        _WIN_STARTUP_BAT.unlink(missing_ok=True)
+        _WIN_STARTUP_VBS.unlink(missing_ok=True)
     elif system == "Darwin":
         plist = Path.home() / "Library/LaunchAgents/com.apptracker.launcher.plist"
         subprocess.run(["launchctl", "unload", str(plist)], check=False)
@@ -182,6 +221,15 @@ def _disable_startup() -> None:
         subprocess.run(["systemctl", "--user", "disable", "apptracker"], check=False)
         (Path.home() / ".config/systemd/user/apptracker.service").unlink(missing_ok=True)
     logger.info("Start-on-login disabled.")
+
+
+def _migrate_windows_startup_if_needed(port: int) -> None:
+    """Replace legacy AppTracker.bat (console flash) with silent .vbs."""
+    if platform.system() != "Windows":
+        return
+    if _WIN_STARTUP_BAT.exists() and not _WIN_STARTUP_VBS.exists():
+        logger.info("Migrating Start-on-Login from .bat to silent .vbs…")
+        _enable_startup(port)
 
 
 # ---------------------------------------------------------------------------
@@ -193,20 +241,40 @@ class _ServerThread(threading.Thread):
         super().__init__(daemon=True, name="uvicorn")
         self.port = port
         self._server: uvicorn.Server | None = None
+        self.failed = False
+        self.error: str | None = None
 
     def run(self) -> None:
-        # Ensure the backend package is importable when launched from anywhere.
-        if str(HERE) not in sys.path:
-            sys.path.insert(0, str(HERE))
+        try:
+            # Ensure the backend package is importable when launched from anywhere.
+            if str(HERE) not in sys.path:
+                sys.path.insert(0, str(HERE))
 
-        config = uvicorn.Config(
-            "app.main:app",
-            host="127.0.0.1",
-            port=self.port,
-            log_level="info",
-        )
-        self._server = uvicorn.Server(config)
-        self._server.run()
+            # Always run with a known working directory (Startup may start elsewhere).
+            os.chdir(HERE)
+
+            # Pin DATA_DIR to an absolute path so the database location is
+            # always the same regardless of how/where the launcher is invoked.
+            # Without this, './data' resolves to backend/data/ when launched
+            # from the Startup folder but to project_root/data/ via 'make app'.
+            if not os.environ.get("DATA_DIR"):
+                os.environ["DATA_DIR"] = str(ROOT / "data")
+
+            # pythonw has sys.stdout=None; uvicorn's default ColorFormatter
+            # crashes on stdout.isatty() unless use_colors is forced off.
+            config = uvicorn.Config(
+                "app.main:app",
+                host="127.0.0.1",
+                port=self.port,
+                log_level="info",
+                use_colors=False,
+            )
+            self._server = uvicorn.Server(config)
+            self._server.run()
+        except Exception:
+            self.failed = True
+            self.error = traceback.format_exc()
+            logger.exception("Uvicorn server crashed")
 
     def stop(self) -> None:
         if self._server:
@@ -218,7 +286,7 @@ class _ServerThread(threading.Thread):
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    _configure_logging()
 
     parser = argparse.ArgumentParser(description="Job Application Tracker launcher")
     parser.add_argument("--port", type=int, default=8000, help="Port for the backend server")
@@ -226,25 +294,27 @@ def main() -> None:
     args = parser.parse_args()
 
     port = args.port
-    url = f"http://localhost:{port}"
+    url = f"http://127.0.0.1:{port}"
 
+    _migrate_windows_startup_if_needed(port)
     _build_frontend()
 
     server = _ServerThread(port)
     server.start()
 
-    # Wait up to 5 s for the server to be ready.
-    for _ in range(50):
-        time.sleep(0.1)
-        try:
-            import urllib.request
-            urllib.request.urlopen(f"{url}/api/health", timeout=1)
-            break
-        except Exception:
-            continue
+    healthy = _wait_for_health(url, timeout_s=20.0)
+    if not healthy:
+        logger.error(
+            "Server did not become healthy at %s. See log: %s",
+            url,
+            LOG_FILE,
+        )
+        if server.error:
+            logger.error("Server thread error:\n%s", server.error)
 
     if not _TRAY_AVAILABLE or args.no_tray:
-        logger.info("App running at %s  (Ctrl+C to quit)", url)
+        if healthy:
+            logger.info("App running at %s  (Ctrl+C to quit)", url)
         try:
             server.join()
         except KeyboardInterrupt:
@@ -255,7 +325,14 @@ def main() -> None:
     icon_image = _make_tray_icon()
 
     def on_open(_icon, _item) -> None:
-        webbrowser.open(url)
+        if _wait_for_health(url, timeout_s=3.0):
+            webbrowser.open(url)
+        else:
+            logger.error(
+                "Cannot open app — server not responding at %s. See %s",
+                url,
+                LOG_FILE,
+            )
 
     def on_toggle_startup(_icon, _item) -> None:
         if _is_startup_enabled():
@@ -278,6 +355,7 @@ def main() -> None:
     )
 
     icon = pystray.Icon("AppTracker", icon_image, "AppTracker", menu)
+    logger.info("Tray ready. Server healthy=%s url=%s", healthy, url)
     icon.run()
 
 
