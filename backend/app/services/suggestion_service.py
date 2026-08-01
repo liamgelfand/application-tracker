@@ -4,6 +4,7 @@ import json
 import re
 from datetime import datetime, timezone
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -15,6 +16,31 @@ from ..models import (
     SuggestionKind,
     SuggestionStatus,
 )
+
+
+def _normalize(text: str) -> str:
+    """Lowercase, strip punctuation/common suffixes for fuzzy comparison."""
+    text = text.lower()
+    text = re.sub(r"\b(inc|llc|ltd|corp|co|group|technologies|tech|solutions|recruiting|careers|jobs|notifications?|workday|notify)\b", "", text)
+    text = re.sub(r"[^a-z0-9 ]", "", text)
+    return text.strip()
+
+
+def _find_existing_application(db: Session, company: str | None, title: str | None) -> Application | None:
+    """Return an existing application that fuzzy-matches company + (optionally) title."""
+    if not company:
+        return None
+    norm_company = _normalize(company)
+    if not norm_company:
+        return None
+    apps = db.execute(select(Application)).scalars().all()
+    for app in apps:
+        if _normalize(app.company) == norm_company:
+            if title is None or _normalize(title) in _normalize(app.title or "") or _normalize(app.title or "") in _normalize(title):
+                return app
+            # Company match alone is a strong signal
+            return app
+    return None
 
 
 def _company_from_sender(sender: str | None) -> str | None:
@@ -59,7 +85,7 @@ def build_suggestion_from_analysis(
 
     suggested_status = _coerce_status(analysis.get("suggested_status"))
     payload = {
-        "company": analysis.get("company"),
+        "company": analysis.get("company"),   # now always populated for job-related emails
         "title": analysis.get("title"),
     }
 
@@ -85,24 +111,47 @@ def apply_suggestion(
 
     if suggestion.kind == SuggestionKind.new_application:
         payload = json.loads(suggestion.payload) if suggestion.payload else {}
-        app = Application(
-            company=payload.get("company") or "Unknown",
-            title=payload.get("title") or "Unknown",
-            status=suggestion.suggested_status or ApplicationStatus.applied,
-            source="email",
-            date_applied=datetime.now(timezone.utc),
-        )
-        db.add(app)
-        db.flush()
-        db.add(
-            StatusEvent(
-                application_id=app.id,
-                from_status=None,
-                to_status=app.status,
-                note=suggestion.summary or "Created from email",
-                source=source,
+        company = payload.get("company") or _company_from_sender(suggestion.email_sender)
+        title = payload.get("title")
+
+        # Fuzzy dedup: if we already have this company, update instead of creating.
+        existing = _find_existing_application(db, company, title)
+        if existing is not None:
+            if (
+                suggestion.suggested_status
+                and suggestion.suggested_status != existing.status
+            ):
+                old = existing.status
+                existing.status = suggestion.suggested_status
+                db.add(
+                    StatusEvent(
+                        application_id=existing.id,
+                        from_status=old,
+                        to_status=existing.status,
+                        note=suggestion.summary or "Updated from email",
+                        source=source,
+                    )
+                )
+            app = existing
+        else:
+            app = Application(
+                company=company or "Unknown",
+                title=title or "Unknown",
+                status=suggestion.suggested_status or ApplicationStatus.applied,
+                source="email",
+                date_applied=datetime.now(timezone.utc),
             )
-        )
+            db.add(app)
+            db.flush()
+            db.add(
+                StatusEvent(
+                    application_id=app.id,
+                    from_status=None,
+                    to_status=app.status,
+                    note=suggestion.summary or "Created from email",
+                    source=source,
+                )
+            )
     elif suggestion.application_id:
         app = db.get(Application, suggestion.application_id)
         if app is not None:

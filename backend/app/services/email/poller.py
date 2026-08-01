@@ -81,7 +81,12 @@ def sync_account(db: Session, account: EmailAccount) -> dict:
                 llm_failed = True
                 analysis = {}
 
-            if not llm_failed:
+            if analysis is None:
+                # Blocklisted sender — mark processed, move on.
+                llm_failed = False
+                analysis = {}
+
+            if not llm_failed and analysis:
                 logger.info(
                     "uid=%s → is_job_related=%s kind=%s confidence=%s summary=%r",
                     msg.uid,

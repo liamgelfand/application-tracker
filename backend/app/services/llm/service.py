@@ -44,7 +44,7 @@ def _completion_kwargs(provider: LLMProvider) -> dict:
     return kwargs
 
 
-def complete(db: Session, messages: list[dict], *, temperature: float = 0.1) -> str:
+def complete(db: Session, messages: list[dict], *, temperature: float = 0.0) -> str:
     """Run a chat completion against the active provider and return the text."""
     provider = get_active_provider(db)
     if provider is None:
@@ -80,7 +80,7 @@ def _extract_json(text: str) -> str:
     return text
 
 
-def complete_json(db: Session, messages: list[dict], *, temperature: float = 0.1) -> dict:
+def complete_json(db: Session, messages: list[dict], *, temperature: float = 0.0) -> dict:
     """Run a completion and parse the response as JSON."""
     raw = complete(db, messages, temperature=temperature)
     snippet = _extract_json(raw)
