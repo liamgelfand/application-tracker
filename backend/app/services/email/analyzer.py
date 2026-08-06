@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ...models import Application, ApplicationStatus
 from ..llm.service import complete_json
-from .prefilter import clean_body, is_blocked
+from .prefilter import clean_body, is_blocked, is_otp_or_verification
 
 logger = logging.getLogger("tracker.analyzer")
 
@@ -26,7 +26,13 @@ SYSTEM_PROMPT = (
     "not in the list.\n"
     "3. Only use an application_id that appears in the provided list — never invent one.\n"
     "4. Marketing emails, order confirmations, food delivery, banking alerts, payroll, "
-    "and social media notifications are NEVER job-related even if they contain the word 'application'."
+    "and social media notifications are NEVER job-related even if they contain the word 'application'.\n"
+    "5. Security codes, OTP, 'verify your email', and 'enter this code to continue' emails "
+    "are NOT useful for tracking. Set is_job_related=false for those — never create a new "
+    "application from them.\n"
+    "6. Always extract the job title when the email mentions a specific role. If the email "
+    "is only a vague follow-up (assessment invite with no role name) and the company is "
+    "already in the list, use status_change on that application — do not invent a title."
 )
 
 VALID_STATUSES = [s.value for s in ApplicationStatus]
@@ -75,6 +81,19 @@ def analyze_email(
     if is_blocked(sender):
         logger.info("Skipped (blocklisted sender): %r", sender)
         return None
+
+    if is_otp_or_verification(subject, body):
+        logger.info("Skipped (OTP/verification email): subject=%r", subject)
+        return {
+            "is_job_related": False,
+            "kind": None,
+            "application_id": None,
+            "suggested_status": None,
+            "company": None,
+            "title": None,
+            "summary": "Skipped verification/OTP email — no application data.",
+            "confidence": 100,
+        }
 
     apps = db.execute(select(Application)).scalars().all()
     app_lines = (

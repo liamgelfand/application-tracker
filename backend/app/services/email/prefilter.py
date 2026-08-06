@@ -181,6 +181,44 @@ def is_blocked(sender: str) -> bool:
     return False
 
 
+# OTP / verification emails are job-adjacent but carry no useful tracking data.
+_OTP_SUBJECT_RE = re.compile(
+    r"(security code|verification code|verify your (email|account)|"
+    r"one[- ]time (code|password)|confirm your identity|"
+    r"final step to complete|action required.*verif|"
+    r"enter (this|the) code|otp\b)",
+    re.IGNORECASE,
+)
+_OTP_BODY_RE = re.compile(
+    r"(security code|verification code|one[- ]time (code|password)|"
+    r"confirm your identity|copy and paste this code|"
+    r"use this code to confirm|code will expire|"
+    r"enter the code|resubmit your application)",
+    re.IGNORECASE,
+)
+
+
+def is_otp_or_verification(subject: str, body: str) -> bool:
+    """True for OTP / email-verify messages that should not create applications."""
+    if _OTP_SUBJECT_RE.search(subject or ""):
+        return True
+    # Body-only match: require a short numeric/alphanumeric code pattern nearby
+    # so we don't drop real "thank you for applying" emails that mention verify.
+    snippet = (body or "")[:800]
+    if _OTP_BODY_RE.search(snippet) and re.search(
+        r"\b[A-Za-z0-9]{4,10}\b", snippet
+    ):
+        # Prefer subject signals; for body, also check it's not a rich confirmation.
+        if not re.search(
+            r"(thank you for apply|we received your application|"
+            r"application for the .+ role)",
+            snippet,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
 def clean_body(body: str, max_chars: int = 4000) -> str:
     """Strip boilerplate from an email body and truncate."""
     text = body
