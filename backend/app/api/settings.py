@@ -5,22 +5,29 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings as app_settings
-from ..core.security import encrypt
+from ..core.security import decrypt, encrypt
 from ..db import get_db
 from ..models import LLMProvider
 from ..schemas import (
+    ConnectionTestResult,
     LLMProviderCreate,
     LLMProviderOut,
+    LLMProviderTestIn,
     LLMProviderUpdate,
     MessageOut,
     SettingsOut,
     SettingsUpdate,
 )
 from ..scheduler import reschedule as reschedule_poller
+from ..services.llm.service import test_llm_connection
 from ..services.settings_service import (
     get_auto_apply,
+    get_follow_up_days,
+    get_min_confidence,
     get_poll_interval,
     set_auto_apply,
+    set_follow_up_days,
+    set_min_confidence,
     set_poll_interval,
 )
 
@@ -41,14 +48,20 @@ def _to_out(provider: LLMProvider) -> LLMProviderOut:
 
 
 # ---------- App settings ----------
-@router.get("", response_model=SettingsOut)
-def get_settings(db: Session = Depends(get_db)) -> SettingsOut:
+def _settings_out(db: Session) -> SettingsOut:
     return SettingsOut(
         email_poll_interval_seconds=get_poll_interval(
             db, app_settings.email_poll_interval_seconds
         ),
         auto_apply_suggestions=get_auto_apply(db),
+        min_suggestion_confidence=get_min_confidence(db),
+        follow_up_days=get_follow_up_days(db),
     )
+
+
+@router.get("", response_model=SettingsOut)
+def get_settings(db: Session = Depends(get_db)) -> SettingsOut:
+    return _settings_out(db)
 
 
 @router.patch("", response_model=SettingsOut)
@@ -63,12 +76,11 @@ def update_settings(
             reschedule_poller(applied)
         except Exception:  # noqa: BLE001 - scheduler may not be running (e.g. tests)
             pass
-    return SettingsOut(
-        email_poll_interval_seconds=get_poll_interval(
-            db, app_settings.email_poll_interval_seconds
-        ),
-        auto_apply_suggestions=get_auto_apply(db),
-    )
+    if payload.min_suggestion_confidence is not None:
+        set_min_confidence(db, payload.min_suggestion_confidence)
+    if payload.follow_up_days is not None:
+        set_follow_up_days(db, payload.follow_up_days)
+    return _settings_out(db)
 
 
 # ---------- LLM providers ----------
@@ -76,6 +88,22 @@ def update_settings(
 def list_providers(db: Session = Depends(get_db)) -> list[LLMProviderOut]:
     providers = db.execute(select(LLMProvider)).scalars().all()
     return [_to_out(p) for p in providers]
+
+
+@router.post("/llm-providers/test", response_model=ConnectionTestResult)
+def test_provider_credentials(payload: LLMProviderTestIn) -> ConnectionTestResult:
+    """Verify provider/model/key with a tiny completion (does not save)."""
+    if not (payload.model or "").strip():
+        return ConnectionTestResult(ok=False, message="Model name is required.")
+    if payload.provider != "ollama" and not (payload.api_key or "").strip():
+        return ConnectionTestResult(ok=False, message="API key is required for this provider.")
+    ok, message = test_llm_connection(
+        provider=payload.provider.strip(),
+        model=payload.model.strip(),
+        api_key=(payload.api_key or None),
+        api_base=(payload.api_base or None),
+    )
+    return ConnectionTestResult(ok=ok, message=message)
 
 
 @router.post("/llm-providers", response_model=LLMProviderOut, status_code=201)
@@ -120,6 +148,22 @@ def update_provider(
     db.commit()
     db.refresh(provider)
     return _to_out(provider)
+
+
+@router.post("/llm-providers/{provider_id}/test", response_model=ConnectionTestResult)
+def test_saved_provider(
+    provider_id: int, db: Session = Depends(get_db)
+) -> ConnectionTestResult:
+    provider = db.get(LLMProvider, provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    ok, message = test_llm_connection(
+        provider=provider.provider,
+        model=provider.model,
+        api_key=decrypt(provider.api_key_encrypted),
+        api_base=provider.api_base,
+    )
+    return ConnectionTestResult(ok=ok, message=message)
 
 
 @router.post("/llm-providers/{provider_id}/activate", response_model=LLMProviderOut)

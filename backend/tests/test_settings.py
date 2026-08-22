@@ -2,6 +2,18 @@ def test_default_settings(client):
     data = client.get("/api/settings").json()
     assert data["auto_apply_suggestions"] is False
     assert data["email_poll_interval_seconds"] == 900
+    assert data["min_suggestion_confidence"] == 70
+    assert data["follow_up_days"] == 14
+
+
+def test_update_confidence_and_follow_up(client):
+    r = client.patch(
+        "/api/settings",
+        json={"min_suggestion_confidence": 85, "follow_up_days": 21},
+    )
+    assert r.status_code == 200
+    assert r.json()["min_suggestion_confidence"] == 85
+    assert r.json()["follow_up_days"] == 21
 
 
 def test_update_auto_apply(client):

@@ -7,8 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...models import Application, ApplicationStatus
-from ..llm.service import complete_json
+from ..llm.service import complete_json, get_active_provider
+from ..suggestion_service import _titles_match, extract_job_id
 from .prefilter import clean_body, is_blocked, is_otp_or_verification
+from .subject_fastpath import try_fastpath
 
 logger = logging.getLogger("tracker.analyzer")
 
@@ -17,27 +19,26 @@ SYSTEM_PROMPT = (
     "Your only job is to decide whether an email is related to a specific job application "
     "(not generic career newsletters or unrelated marketing) and, if so, what action to take.\n\n"
     "IMPORTANT RULES you must always follow:\n"
-    "1. First, identify the hiring company from the email (sender domain, body, or subject). "
-    "Write this company name in the 'company' field EVERY TIME the email is job-related, "
-    "regardless of whether it's a new or existing application.\n"
-    "2. Check if that company is already in the user's application list.\n"
-    "   - If YES → use kind='status_change' with the exact application_id from the list.\n"
-    "   - If NO → use kind='new_application'. NEVER use kind='status_change' for a company "
-    "not in the list.\n"
-    "3. Only use an application_id that appears in the provided list — never invent one.\n"
-    "4. Marketing emails, order confirmations, food delivery, banking alerts, payroll, "
+    "1. Identify the hiring company AND the specific role. A single company (e.g. IBM) often "
+    "has MANY separate applications. Never treat 'same company' as the same application.\n"
+    "2. Extract job_id when the email includes a requisition/job/posting number "
+    "(e.g. '128506' in 'Liam Gelfand - 128506 - Software Developer…'). Put it in job_id.\n"
+    "3. Match to an existing application ONLY when job_id matches, OR the role title clearly "
+    "matches that row's title. If the company exists but the role/job_id is different or new → "
+    "kind='new_application' with application_id=null.\n"
+    "4. Only use an application_id that appears in the provided list — never invent one. "
+    "If unsure which of several same-company rows it is, prefer new_application over guessing.\n"
+    "5. Marketing emails, order confirmations, food delivery, banking alerts, payroll, "
     "and social media notifications are NEVER job-related even if they contain the word 'application'.\n"
-    "5. Security codes, OTP, 'verify your email', and 'enter this code to continue' emails "
-    "are NOT useful for tracking. Set is_job_related=false for those — never create a new "
-    "application from them.\n"
-    "6. Always extract the job title when the email mentions a specific role. If the email "
-    "is only a vague follow-up (assessment invite with no role name) and the company is "
-    "already in the list, use status_change on that application — do not invent a title."
+    "6. Security codes, OTP, 'verify your email', and 'enter this code to continue' emails "
+    "are NOT useful for tracking. Set is_job_related=false for those.\n"
+    "7. Always extract the job title when mentioned. Vague follow-ups with no role and no job_id "
+    "should use kind='note' with application_id=null — do not attach them to a random same-company row."
 )
 
 VALID_STATUSES = [s.value for s in ApplicationStatus]
 
-USER_TEMPLATE = """User's existing applications (id | company | title | current status):
+USER_TEMPLATE = """User's existing applications (id | company | title | job_id | current status):
 {applications}
 
 Email to analyze:
@@ -51,11 +52,12 @@ Body:
 Think step by step (internally), then respond with ONLY a JSON object:
 {{
   "company": string|null,          // hiring company name — always fill this if job-related
+  "title": string|null,            // specific role / program name from the email
+  "job_id": string|null,           // requisition/job/posting number if present
   "is_job_related": boolean,
   "kind": "status_change" | "new_application" | "note" | null,
-  "application_id": number|null,   // ONLY use an id from the list above, or null
+  "application_id": number|null,   // ONLY an id from the list above when role/job_id matches, else null
   "suggested_status": {statuses}|null,
-  "title": string|null,            // job title — for new_application
   "summary": string,               // one sentence describing the suggested action
   "confidence": number             // 0-100
 }}
@@ -63,7 +65,7 @@ Think step by step (internally), then respond with ONLY a JSON object:
 Status guidance for new_application:
 - Application confirmation / receipt → "applied"
 - Interview invite or scheduling → "interview"
-- Phone screen / recruiter call → "phone_screen"
+- Phone screen / recruiter call / assessment invite → "phone_screen"
 - Offer letter → "offer"
 - Rejection → "rejected"
 - Cold recruiter outreach (not yet applied) → "saved"
@@ -77,10 +79,20 @@ def analyze_email(
     subject: str,
     body: str,
 ) -> dict | None:
-    """Analyze one email. Returns None if the sender is on the blocklist."""
+    """Analyze one email. Returns None if classification must wait for an LLM."""
     if is_blocked(sender):
         logger.info("Skipped (blocklisted sender): %r", sender)
-        return None
+        return {
+            "is_job_related": False,
+            "kind": None,
+            "application_id": None,
+            "suggested_status": None,
+            "company": None,
+            "title": None,
+            "job_id": None,
+            "summary": "Skipped blocklisted sender.",
+            "confidence": 100,
+        }
 
     if is_otp_or_verification(subject, body):
         logger.info("Skipped (OTP/verification email): subject=%r", subject)
@@ -91,18 +103,61 @@ def analyze_email(
             "suggested_status": None,
             "company": None,
             "title": None,
+            "job_id": None,
             "summary": "Skipped verification/OTP email — no application data.",
             "confidence": 100,
         }
 
+    fast = try_fastpath(subject, body, sender)
+    if fast:
+        job_id = extract_job_id(subject, body)
+        if job_id:
+            fast["job_id"] = job_id
+        apps_quick = list(db.execute(select(Application)).scalars().all())
+        company = (fast.get("company") or "").lower()
+        title = fast.get("title")
+        matched = None
+        for a in apps_quick:
+            if not company or company not in (a.company or "").lower():
+                continue
+            if job_id and a.job_id and job_id == a.job_id:
+                matched = a
+                break
+            if title and _titles_match(a.title, title):
+                matched = a
+                break
+        if matched is not None:
+            fast["kind"] = "status_change"
+            fast["application_id"] = matched.id
+        else:
+            # New role at a known (or unknown) company — do not attach to a sibling.
+            fast["kind"] = "new_application"
+            fast["application_id"] = None
+        logger.info(
+            "Fastpath hit: subject=%r company=%r title=%r job_id=%r app_id=%r",
+            subject,
+            fast.get("company"),
+            fast.get("title"),
+            fast.get("job_id"),
+            fast.get("application_id"),
+        )
+        return fast
+
     apps = db.execute(select(Application)).scalars().all()
     app_lines = (
-        "\n".join(f"{a.id} | {a.company} | {a.title} | {a.status.value}" for a in apps)
+        "\n".join(
+            f"{a.id} | {a.company} | {a.title} | {a.job_id or '-'} | {a.status.value}"
+            for a in apps
+        )
         if apps
         else "(none yet)"
     )
 
     cleaned_body = clean_body(body)
+
+    if get_active_provider(db) is None:
+        logger.info("No LLM provider; skipping non-fastpath email: %r", subject)
+        return None
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -117,4 +172,14 @@ def analyze_email(
             ),
         },
     ]
-    return complete_json(db, messages)
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+    result = complete_json(db, messages)
+    # Prefer regex job_id from subject when the model omits it.
+    if not result.get("job_id"):
+        jid = extract_job_id(subject, body)
+        if jid:
+            result["job_id"] = jid
+    return result

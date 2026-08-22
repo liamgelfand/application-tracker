@@ -18,6 +18,8 @@ backend/data/
 *.key
 .env
 .env.*
+localenv.txt
+**/localenv.txt
 !.env.example
 
 # Node / frontend

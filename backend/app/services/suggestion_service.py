@@ -18,6 +18,15 @@ from ..models import (
 )
 from .email.prefilter import is_otp_or_verification
 
+# Prefer explicit numeric "12345 - Role" (IBM-style) before looser labels.
+_JOB_ID_PATTERNS = [
+    re.compile(r"\b(\d{5,8})\s*[-–—]\s+[A-Za-z]"),
+    re.compile(
+        r"\b(?:requisition|job\s*id|job\s*#|posting\s*id)\s*[:#-]?\s*([A-Z0-9-]{4,})\b",
+        re.IGNORECASE,
+    ),
+]
+
 
 def _normalize(text: str) -> str:
     """Lowercase, strip punctuation/common suffixes for fuzzy comparison."""
@@ -39,10 +48,55 @@ def _is_placeholder_title(title: str | None) -> bool:
     return _normalize(title) in {"", "unknown", "n a", "na", "none", "null"}
 
 
+def extract_job_id(*texts: str | None) -> str | None:
+    """Pull an employer job/req id out of subject/body when present."""
+    blob = " ".join(t for t in texts if t)
+    if not blob:
+        return None
+    for pat in _JOB_ID_PATTERNS:
+        m = pat.search(blob)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def _titles_match(a: str | None, b: str | None) -> bool:
+    """True when two role titles refer to the same posting (strict)."""
+    if _is_placeholder_title(a) or _is_placeholder_title(b):
+        return False
+    na, nb = _normalize(a or ""), _normalize(b or "")
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    # Substring only when the shorter title is long enough to be specific
+    # (avoids "software developer" matching every SWE-ish IBM role).
+    short, long = (na, nb) if len(na) <= len(nb) else (nb, na)
+    if len(short) < 28:
+        return False
+    return short in long
+
+
+def _same_role(
+    app: Application,
+    *,
+    title: str | None,
+    job_id: str | None,
+) -> bool:
+    if job_id and app.job_id and job_id.strip() == app.job_id.strip():
+        return True
+    if job_id and app.job_id and job_id.strip() != app.job_id.strip():
+        return False
+    return _titles_match(app.title, title)
+
+
 def _find_existing_application(
-    db: Session, company: str | None, title: str | None
+    db: Session,
+    company: str | None,
+    title: str | None,
+    job_id: str | None = None,
 ) -> Application | None:
-    """Return an existing application that fuzzy-matches company (+ optional title)."""
+    """Match by job_id first, then company+title. Never collapse different roles."""
     if not company:
         return None
     norm_company = _normalize(company)
@@ -50,11 +104,8 @@ def _find_existing_application(
         return None
 
     apps = list(db.execute(select(Application)).scalars().all())
-    company_matches = [
-        a for a in apps if _normalize(a.company) == norm_company
-    ]
+    company_matches = [a for a in apps if _normalize(a.company) == norm_company]
     if not company_matches:
-        # Substring fallback: "Roblox Assessment" vs "Roblox"
         company_matches = [
             a
             for a in apps
@@ -64,20 +115,29 @@ def _find_existing_application(
     if not company_matches:
         return None
 
-    if title and not _is_placeholder_title(title):
-        norm_title = _normalize(title)
+    if job_id:
+        jid = job_id.strip()
         for app in company_matches:
-            at = _normalize(app.title or "")
-            if not at or _is_placeholder_title(app.title):
-                continue
-            if norm_title in at or at in norm_title:
+            if app.job_id and app.job_id.strip() == jid:
                 return app
+        # Known job_id that doesn't match any row → new role at this company.
+        if title and not _is_placeholder_title(title):
+            for app in company_matches:
+                if _titles_match(app.title, title):
+                    return app
+        return None
 
-    # Prefer a non-placeholder title when merging into company-only matches.
-    for app in company_matches:
-        if not _is_placeholder_title(app.title):
-            return app
-    return company_matches[0]
+    if title and not _is_placeholder_title(title):
+        for app in company_matches:
+            if _titles_match(app.title, title):
+                return app
+        # Distinct role at same company → do not merge.
+        return None
+
+    # No title and no job_id: refuse to guess among multiple company rows.
+    if len(company_matches) == 1 and _is_placeholder_title(company_matches[0].title):
+        return company_matches[0]
+    return None
 
 
 def _company_from_sender(sender: str | None) -> str | None:
@@ -87,7 +147,6 @@ def _company_from_sender(sender: str | None) -> str | None:
     m = re.match(r"^(.+?)\s*<", sender)
     if m:
         name = m.group(1).strip().strip('"')
-        # "Roblox Assessment" → "Roblox"
         name = re.sub(
             r"\b(assessment|recruiting|careers|talent|hr|human resources|"
             r"notifications?|no-?reply|team)\b",
@@ -118,14 +177,13 @@ def _enrich_application(
     *,
     company: str | None,
     title: str | None,
+    job_id: str | None = None,
 ) -> None:
     """Fill missing/placeholder fields on an existing application."""
-    if company and (_is_placeholder_title(app.company) or len(company) < len(app.company or "")):
-        # Only replace company if ours looks cleaner and still matches.
-        if _normalize(company) and _normalize(company) in _normalize(app.company or company):
-            pass  # keep existing company name
     if title and not _is_placeholder_title(title) and _is_placeholder_title(app.title):
         app.title = title
+    if job_id and not app.job_id:
+        app.job_id = job_id.strip()
 
 
 def _create_or_merge(
@@ -136,19 +194,21 @@ def _create_or_merge(
     status: ApplicationStatus | None,
     summary: str | None,
     source: EventSource,
+    job_id: str | None = None,
 ) -> Application | None:
-    """Merge into an existing company match or create a new application."""
+    """Merge into a matching role or create a new application."""
     company = (company or "").strip() or None
     title = (title or "").strip() or None
+    job_id = (job_id or "").strip() or None
     if _is_placeholder_title(title):
         title = None
 
     if not company:
         return None
 
-    existing = _find_existing_application(db, company, title)
+    existing = _find_existing_application(db, company, title, job_id)
     if existing is not None:
-        _enrich_application(existing, company=company, title=title)
+        _enrich_application(existing, company=company, title=title, job_id=job_id)
         if status and status != existing.status:
             old = existing.status
             existing.status = status
@@ -161,7 +221,7 @@ def _create_or_merge(
                     source=source,
                 )
             )
-        elif title and not _is_placeholder_title(title):
+        elif title or job_id:
             db.add(
                 StatusEvent(
                     application_id=existing.id,
@@ -173,10 +233,10 @@ def _create_or_merge(
             )
         return existing
 
-    # No existing match — require at least a company; title may be Unknown.
     app = Application(
         company=company,
         title=title or "Unknown",
+        job_id=job_id,
         status=status or ApplicationStatus.applied,
         source="email",
         date_applied=datetime.now(timezone.utc),
@@ -221,17 +281,38 @@ def build_suggestion_from_analysis(
     if _is_placeholder_title(title):
         title = None
 
-    # Don't queue empty shells: new_application with no company is useless.
+    job_id = analysis.get("job_id") or extract_job_id(subject, snippet)
+    if isinstance(job_id, str):
+        job_id = job_id.strip() or None
+    else:
+        job_id = None
+
     if kind == SuggestionKind.new_application and not company:
         return None
+
+    # If LLM attached a status_change to a company match but we have a distinct
+    # role/job_id, force a new_application so we don't pollute the wrong row.
+    app_id = analysis.get("application_id")
+    if (
+        kind == SuggestionKind.status_change
+        and app_id is not None
+        and (title or job_id)
+    ):
+        # Retargeting happens at apply-time; keep payload accurate here.
+        pass
+
+    # Distinct role signals without a matching id → treat as new application.
+    if kind == SuggestionKind.status_change and (title or job_id) and not app_id:
+        kind = SuggestionKind.new_application
 
     payload = {
         "company": company,
         "title": title,
+        "job_id": job_id,
     }
 
     return Suggestion(
-        application_id=analysis.get("application_id"),
+        application_id=app_id if isinstance(app_id, int) else None,
         kind=kind,
         status=SuggestionStatus.pending,
         suggested_status=suggested_status,
@@ -245,10 +326,15 @@ def build_suggestion_from_analysis(
 
 
 def apply_suggestion(
-    db: Session, suggestion: Suggestion, *, source: EventSource = EventSource.email
+    db: Session,
+    suggestion: Suggestion,
+    *,
+    source: EventSource = EventSource.email,
+    company_override: str | None = None,
+    title_override: str | None = None,
+    status_override: ApplicationStatus | None = None,
 ) -> Application | None:
     """Apply a suggestion's change. Returns the affected application (if any)."""
-    # Hard block: OTP / verification suggestions should never create rows.
     if is_otp_or_verification(
         suggestion.email_subject or "", suggestion.email_snippet or ""
     ):
@@ -257,10 +343,21 @@ def apply_suggestion(
         return None
 
     payload = json.loads(suggestion.payload) if suggestion.payload else {}
+    if company_override is not None:
+        payload["company"] = company_override
+    if title_override is not None:
+        payload["title"] = title_override
+    suggestion.payload = json.dumps(payload)
+    if status_override is not None:
+        suggestion.suggested_status = status_override
+
     company = payload.get("company") or _company_from_sender(suggestion.email_sender)
     title = payload.get("title")
     if _is_placeholder_title(title):
         title = None
+    job_id = payload.get("job_id") or extract_job_id(
+        suggestion.email_subject, suggestion.email_snippet
+    )
 
     app: Application | None = None
 
@@ -269,6 +366,7 @@ def apply_suggestion(
             db,
             company=company,
             title=title,
+            job_id=job_id,
             status=suggestion.suggested_status,
             summary=suggestion.summary,
             source=source,
@@ -276,13 +374,31 @@ def apply_suggestion(
     elif suggestion.application_id:
         app = db.get(Application, suggestion.application_id)
         if app is not None:
-            _enrich_application(app, company=company, title=title)
-            # If the LLM pointed at the wrong company, prefer fuzzy match.
-            if company and _normalize(company) not in _normalize(app.company):
-                better = _find_existing_application(db, company, title)
+            # Retarget when the LLM pointed at the wrong role at the same company.
+            if (title or job_id) and not _same_role(app, title=title, job_id=job_id):
+                better = _find_existing_application(db, company, title, job_id)
                 if better is not None:
                     app = better
-                    _enrich_application(app, company=company, title=title)
+                else:
+                    app = _create_or_merge(
+                        db,
+                        company=company,
+                        title=title,
+                        job_id=job_id,
+                        status=suggestion.suggested_status or ApplicationStatus.applied,
+                        summary=suggestion.summary,
+                        source=source,
+                    )
+                    suggestion.status = SuggestionStatus.approved
+                    db.commit()
+                    return app
+
+            _enrich_application(app, company=company, title=title, job_id=job_id)
+            if company and _normalize(company) not in _normalize(app.company):
+                better = _find_existing_application(db, company, title, job_id)
+                if better is not None:
+                    app = better
+                    _enrich_application(app, company=company, title=title, job_id=job_id)
             if (
                 suggestion.kind == SuggestionKind.status_change
                 and suggestion.suggested_status
@@ -314,16 +430,17 @@ def apply_suggestion(
                 db,
                 company=company,
                 title=title,
+                job_id=job_id,
                 status=suggestion.suggested_status,
                 summary=suggestion.summary,
                 source=source,
             )
     else:
-        # status_change/note with no application_id — merge or create.
         app = _create_or_merge(
             db,
             company=company,
             title=title,
+            job_id=job_id,
             status=suggestion.suggested_status or ApplicationStatus.applied,
             summary=suggestion.summary,
             source=source,

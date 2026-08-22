@@ -344,11 +344,47 @@ def main() -> None:
         server.stop()
         _icon.stop()
 
+    def on_health(_icon, _item) -> None:
+        import json
+        import urllib.request
+
+        try:
+            with urllib.request.urlopen(f"{url}/api/health", timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            llm = data.get("llm") or {}
+            email = data.get("email") or {}
+            sync = data.get("sync") or {}
+            if llm.get("configured"):
+                llm_line = f"LLM: {llm.get('name')} ({llm.get('provider')}/{llm.get('model')})"
+            else:
+                llm_line = "LLM: not configured"
+            email_line = (
+                f"Email: {email.get('active', 0)}/{email.get('accounts', 0)} active"
+            )
+            if email.get("last_synced_at"):
+                email_line += f" · last sync {email['last_synced_at']}"
+            sync_line = (
+                f"Sync: {sync.get('message') or sync.get('phase') or 'idle'}"
+            )
+            msg = f"{llm_line}\n{email_line}\n{sync_line}"
+            title = "AppTracker — healthy"
+            try:
+                _icon.notify(msg, title)
+            except Exception:
+                logger.info("Health check:\n%s", msg)
+        except Exception as exc:
+            err = f"Server not responding at {url}\n{exc}"
+            try:
+                _icon.notify(err, "AppTracker — unhealthy")
+            except Exception:
+                logger.error(err)
+
     def startup_label(_item) -> str:
         return "✓ Start on Login" if _is_startup_enabled() else "Start on Login"
 
     menu = pystray.Menu(
         pystray.MenuItem("Open AppTracker", on_open, default=True),
+        pystray.MenuItem("Health Check", on_health),
         pystray.MenuItem(startup_label, on_toggle_startup),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", on_quit),

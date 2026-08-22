@@ -23,12 +23,12 @@ export const STATUS_LABELS: Record<ApplicationStatus, string> = {
 };
 
 export const STATUS_COLORS: Record<ApplicationStatus, string> = {
-  saved: "#64748b",
-  applied: "#3b82f6",
-  phone_screen: "#8b5cf6",
-  interview: "#f59e0b",
-  offer: "#10b981",
-  rejected: "#ef4444",
-  ghosted: "#6b7280",
-  accepted: "#16a34a",
+  saved:        "#52525b",   /* zinc-600   — neutral, not started */
+  applied:      "#0ea5e9",   /* sky-500    — submitted */
+  phone_screen: "#14b8a6",   /* teal-500   — first contact (matches accent) */
+  interview:    "#f59e0b",   /* amber-500  — active process */
+  offer:        "#22c55e",   /* green-500  — positive outcome */
+  rejected:     "#f43f5e",   /* rose-500   — closed negative */
+  ghosted:      "#3f3f46",   /* zinc-700   — silent */
+  accepted:     "#16a34a",   /* green-600  — accepted offer */
 };

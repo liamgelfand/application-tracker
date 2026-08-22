@@ -1,37 +1,108 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Suggestion, SuggestionStatus
-from ..schemas import MessageOut, SuggestionOut
+from ..schemas import (
+    MessageOut,
+    SuggestionApproveIn,
+    SuggestionBulkIn,
+    SuggestionOut,
+)
 from ..services.suggestion_service import apply_suggestion
 
 router = APIRouter(prefix="/api/suggestions", tags=["suggestions"])
+
+
+def _to_out(suggestion: Suggestion) -> SuggestionOut:
+    payload: dict = {}
+    if suggestion.payload:
+        try:
+            payload = json.loads(suggestion.payload)
+        except json.JSONDecodeError:
+            payload = {}
+    return SuggestionOut(
+        id=suggestion.id,
+        application_id=suggestion.application_id,
+        kind=suggestion.kind,
+        status=suggestion.status,
+        suggested_status=suggestion.suggested_status,
+        summary=suggestion.summary,
+        confidence=suggestion.confidence,
+        company=payload.get("company"),
+        title=payload.get("title"),
+        job_id=payload.get("job_id"),
+        email_subject=suggestion.email_subject,
+        email_sender=suggestion.email_sender,
+        email_snippet=suggestion.email_snippet,
+        created_at=suggestion.created_at,
+    )
 
 
 @router.get("", response_model=list[SuggestionOut])
 def list_suggestions(
     status: SuggestionStatus | None = SuggestionStatus.pending,
     db: Session = Depends(get_db),
-) -> list[Suggestion]:
+) -> list[SuggestionOut]:
     stmt = select(Suggestion)
     if status is not None:
         stmt = stmt.where(Suggestion.status == status)
     stmt = stmt.order_by(Suggestion.created_at.desc())
-    return list(db.execute(stmt).scalars().all())
+    return [_to_out(s) for s in db.execute(stmt).scalars().all()]
+
+
+@router.post("/bulk-approve", response_model=MessageOut)
+def bulk_approve(
+    payload: SuggestionBulkIn, db: Session = Depends(get_db)
+) -> MessageOut:
+    count = 0
+    for sid in payload.ids:
+        suggestion = db.get(Suggestion, sid)
+        if suggestion is None or suggestion.status != SuggestionStatus.pending:
+            continue
+        apply_suggestion(db, suggestion)
+        count += 1
+    return MessageOut(message=f"Approved {count} suggestion(s)")
+
+
+@router.post("/bulk-reject", response_model=MessageOut)
+def bulk_reject(
+    payload: SuggestionBulkIn, db: Session = Depends(get_db)
+) -> MessageOut:
+    count = 0
+    for sid in payload.ids:
+        suggestion = db.get(Suggestion, sid)
+        if suggestion is None or suggestion.status != SuggestionStatus.pending:
+            continue
+        suggestion.status = SuggestionStatus.rejected
+        count += 1
+    db.commit()
+    return MessageOut(message=f"Dismissed {count} suggestion(s)")
 
 
 @router.post("/{suggestion_id}/approve", response_model=MessageOut)
-def approve_suggestion(suggestion_id: int, db: Session = Depends(get_db)) -> MessageOut:
+def approve_suggestion(
+    suggestion_id: int,
+    payload: SuggestionApproveIn = SuggestionApproveIn(),
+    db: Session = Depends(get_db),
+) -> MessageOut:
     suggestion = db.get(Suggestion, suggestion_id)
     if suggestion is None:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     if suggestion.status != SuggestionStatus.pending:
         raise HTTPException(status_code=409, detail="Suggestion already resolved")
-    apply_suggestion(db, suggestion)
+    apply_suggestion(
+        db,
+        suggestion,
+        company_override=payload.company,
+        title_override=payload.title,
+        status_override=payload.suggested_status,
+    )
     return MessageOut(message="Suggestion approved and applied")
 
 

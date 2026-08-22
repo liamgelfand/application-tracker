@@ -57,3 +57,45 @@ def test_reject_suggestion(client):
     assert len(client.get("/api/suggestions?status=pending").json()) == 0
     # Application status is unchanged after a rejection.
     assert client.get(f"/api/applications/{app['id']}").json()["status"] == "applied"
+
+
+def test_approve_with_overrides(client):
+    sid = _make_suggestion(None, ApplicationStatus.applied)
+    # Attach payload via approve overrides for a new application.
+    from app.db import SessionLocal
+    from app.models import Suggestion
+
+    db = SessionLocal()
+    try:
+        s = db.get(Suggestion, sid)
+        s.kind = SuggestionKind.new_application
+        s.payload = '{"company": "WrongCo", "title": "Wrong"}'
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.post(
+        f"/api/suggestions/{sid}/approve",
+        json={
+            "company": "RightCo",
+            "title": "Backend Engineer",
+            "suggested_status": "applied",
+        },
+    )
+    assert r.status_code == 200
+    apps = client.get("/api/applications").json()
+    match = [a for a in apps if a["company"] == "RightCo"]
+    assert len(match) == 1
+    assert match[0]["title"] == "Backend Engineer"
+
+
+def test_bulk_reject(client):
+    app = client.post(
+        "/api/applications",
+        json={"company": "BulkCo", "title": "SWE", "status": "applied"},
+    ).json()
+    a = _make_suggestion(app["id"], ApplicationStatus.interview)
+    b = _make_suggestion(app["id"], ApplicationStatus.offer)
+    r = client.post("/api/suggestions/bulk-reject", json={"ids": [a, b]})
+    assert r.status_code == 200
+    assert len(client.get("/api/suggestions?status=pending").json()) == 0

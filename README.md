@@ -71,8 +71,8 @@ make setup   # install backend + frontend dependencies (run once)
 make app     # build the frontend, then launch the tray app
 ```
 
-The app opens in your browser automatically and a tray icon appears.
-Right-click the tray icon to **Open**, enable **Start on Login**, or **Quit**.
+The app sits in the system tray (it does not auto-open the browser).
+Right-click the tray icon to **Open**, run a **Health Check**, enable **Start on Login**, or **Quit**.
 
 > **Windows note:** `make` isn't built in — install it with `winget install GnuWin32.Make` or use [Git Bash](https://gitforwindows.org/).  
 > Alternatively run the two commands manually:
@@ -143,15 +143,38 @@ Both suites also run automatically in CI on every push and pull request.
 
 Interactive API docs are available at http://localhost:8000/docs when the backend is running.
 
+## Packaging a Windows `.exe` (optional)
+
+For a single-file tray app without needing Python on the target machine:
+
+```bash
+make setup
+make build
+pip install pyinstaller
+make dist    # writes dist/AppTracker.exe
+```
+
+Or manually:
+
+```powershell
+cd frontend; npm run build; cd ..
+backend\.venv\Scripts\pip install pyinstaller
+backend\.venv\Scripts\pyinstaller --noconfirm backend\apptracker.spec
+```
+
+The first run may still need Visual C++ redistributables. Prefer keeping the project off OneDrive/cloud-synced folders — `node_modules` and `.venv` thrash sync clients.
+
 ## Roadmap / ideas
 
-- Follow-up reminders and interview calendar (.ics) export.
+See [TODO.md](TODO.md) for the planned **research agent** (web scrape to fill job description / title / location when emails are thin).
+
+- Interview calendar (.ics) export.
 - Resume-tailoring suggestions per listing.
 - Notifications to Slack/Discord/email in addition to desktop.
 - Optional authentication for hosted deployments.
 - Firefox build of the browser extension.
 
-Done so far: browser extension, analytics dashboard, CSV/JSON import & export, drag-and-drop board, desktop notifications.
+Done so far: browser extension, analytics, CSV/JSON import & export, drag-and-drop board, desktop notifications, follow-up reminders, merge UI, editable review queue, sync progress, tray health check.
 
 ## Contributing
 

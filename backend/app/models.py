@@ -67,6 +67,9 @@ class Application(Base):
     skills: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Employer req / posting id (e.g. IBM "128506") — distinguishes multiple roles
+    # at the same company.
+    job_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     date_applied: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)

@@ -74,10 +74,11 @@ def _extract_body(msg: email.message.Message) -> str:
 def _connect(
     host: str, port: int, username: str, password: str, use_ssl: bool
 ) -> imaplib.IMAP4:
+    # Timeout so a bad network/DNS can't hang the whole app on startup sync.
     if use_ssl:
-        conn: imaplib.IMAP4 = imaplib.IMAP4_SSL(host, port)
+        conn: imaplib.IMAP4 = imaplib.IMAP4_SSL(host, port, timeout=30)
     else:
-        conn = imaplib.IMAP4(host, port)
+        conn = imaplib.IMAP4(host, port, timeout=30)
     conn.login(username, password)
     return conn
 

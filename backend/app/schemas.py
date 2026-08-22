@@ -37,6 +37,7 @@ class ApplicationBase(BaseModel):
     skills: str | None = None
     notes: str | None = None
     contact_email: str | None = None
+    job_id: str | None = None
     date_applied: datetime | None = None
 
 
@@ -56,6 +57,7 @@ class ApplicationUpdate(BaseModel):
     skills: str | None = None
     notes: str | None = None
     contact_email: str | None = None
+    job_id: str | None = None
     date_applied: datetime | None = None
     status_note: str | None = None  # optional note attached to a status change
 
@@ -68,8 +70,28 @@ class ApplicationOut(ApplicationBase):
     updated_at: datetime
 
 
+class EmailActivityOut(BaseModel):
+    """Related email / suggestion activity for an application timeline."""
+
+    id: int
+    kind: str  # suggestion | processed_email
+    subject: str | None = None
+    sender: str | None = None
+    snippet: str | None = None
+    summary: str | None = None
+    suggestion_status: SuggestionStatus | None = None
+    is_job_related: bool | None = None
+    created_at: datetime
+
+
 class ApplicationDetailOut(ApplicationOut):
     events: list[StatusEventOut] = []
+    related_emails: list[EmailActivityOut] = []
+
+
+class MergeApplicationsIn(BaseModel):
+    source_id: int
+    target_id: int
 
 
 # ---------- Parsing ----------
@@ -117,6 +139,15 @@ class LLMProviderOut(LLMProviderBase):
     is_active: bool
     has_api_key: bool = False
     created_at: datetime
+
+
+class LLMProviderTestIn(BaseModel):
+    """Test credentials before or after saving a provider."""
+
+    provider: str
+    model: str
+    api_key: str | None = None
+    api_base: str | None = None
 
 
 # ---------- Email accounts ----------
@@ -178,10 +209,23 @@ class SuggestionOut(BaseModel):
     suggested_status: ApplicationStatus | None = None
     summary: str | None = None
     confidence: int | None = None
+    company: str | None = None
+    title: str | None = None
+    job_id: str | None = None
     email_subject: str | None = None
     email_sender: str | None = None
     email_snippet: str | None = None
     created_at: datetime
+
+
+class SuggestionApproveIn(BaseModel):
+    company: str | None = None
+    title: str | None = None
+    suggested_status: ApplicationStatus | None = None
+
+
+class SuggestionBulkIn(BaseModel):
+    ids: list[int] = Field(default_factory=list)
 
 
 # ---------- Misc ----------
@@ -192,8 +236,22 @@ class MessageOut(BaseModel):
 class SettingsOut(BaseModel):
     email_poll_interval_seconds: int
     auto_apply_suggestions: bool
+    min_suggestion_confidence: int = 70
+    follow_up_days: int = 14
 
 
 class SettingsUpdate(BaseModel):
     auto_apply_suggestions: bool | None = None
     email_poll_interval_seconds: int | None = None
+    min_suggestion_confidence: int | None = None
+    follow_up_days: int | None = None
+
+
+class SyncProgressOut(BaseModel):
+    running: bool
+    account_id: int | None = None
+    account_name: str | None = None
+    phase: str = "idle"
+    current: int = 0
+    total: int = 0
+    message: str = ""

@@ -1,7 +1,31 @@
 def test_health(client):
     r = client.get("/api/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    data = r.json()
+    assert data["status"] == "ok"
+    assert "llm" in data
+    assert "email" in data
+    assert data["llm"]["configured"] is False
+
+
+def test_merge_applications(client):
+    a = client.post(
+        "/api/applications",
+        json={"company": "Acme", "title": "Unknown", "status": "applied"},
+    ).json()
+    b = client.post(
+        "/api/applications",
+        json={"company": "Acme", "title": "SWE Intern", "status": "applied"},
+    ).json()
+    r = client.post(
+        "/api/applications/merge",
+        json={"source_id": a["id"], "target_id": b["id"]},
+    )
+    assert r.status_code == 200
+    assert r.json()["title"] == "SWE Intern"
+    assert len(client.get("/api/applications").json()) == 1
+    detail = client.get(f"/api/applications/{b['id']}").json()
+    assert "related_emails" in detail
 
 
 def test_application_crud_and_timeline(client):

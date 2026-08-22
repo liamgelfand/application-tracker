@@ -5,9 +5,12 @@ import type {
   ApplicationDetail,
   ApplicationStatus,
   EmailAccount,
+  HealthStatus,
   LLMProvider,
   ParsedJob,
   Suggestion,
+  SuggestionApprovePayload,
+  SyncProgress,
 } from "./types";
 
 const BASE = "/api";
@@ -32,6 +35,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  health: () => request<HealthStatus>("/health"),
+
   // Applications
   listApplications: (params?: { status?: string; search?: string }) => {
     const q = new URLSearchParams();
@@ -59,6 +64,12 @@ export const api = {
     }),
   deleteApplication: (id: number) =>
     request<{ message: string }>(`/applications/${id}`, { method: "DELETE" }),
+  mergeApplications: (sourceId: number, targetId: number) =>
+    request<ApplicationDetail>("/applications/merge", {
+      method: "POST",
+      body: JSON.stringify({ source_id: sourceId, target_id: targetId }),
+    }),
+  listReminders: () => request<Application[]>("/applications/reminders"),
   exportUrl: (format: "csv" | "json") =>
     `${BASE}/applications/export?format=${format}`,
   importApplications: async (file: File) => {
@@ -93,13 +104,24 @@ export const api = {
   // Suggestions
   listSuggestions: (status = "pending") =>
     request<Suggestion[]>(`/suggestions?status=${status}`),
-  approveSuggestion: (id: number) =>
+  approveSuggestion: (id: number, data?: SuggestionApprovePayload) =>
     request<{ message: string }>(`/suggestions/${id}/approve`, {
       method: "POST",
+      body: JSON.stringify(data ?? {}),
     }),
   rejectSuggestion: (id: number) =>
     request<{ message: string }>(`/suggestions/${id}/reject`, {
       method: "POST",
+    }),
+  bulkApproveSuggestions: (ids: number[]) =>
+    request<{ message: string }>("/suggestions/bulk-approve", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+  bulkRejectSuggestions: (ids: number[]) =>
+    request<{ message: string }>("/suggestions/bulk-reject", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
     }),
 
   // Settings + LLM providers
@@ -115,6 +137,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  testProvider: (data: {
+    provider: string;
+    model: string;
+    api_key?: string | null;
+    api_base?: string | null;
+  }) =>
+    request<{ ok: boolean; message: string }>("/settings/llm-providers/test", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  testSavedProvider: (id: number) =>
+    request<{ ok: boolean; message: string }>(
+      `/settings/llm-providers/${id}/test`,
+      { method: "POST" }
+    ),
   updateProvider: (id: number, data: Record<string, unknown>) =>
     request<LLMProvider>(`/settings/llm-providers/${id}`, {
       method: "PATCH",
@@ -150,9 +187,17 @@ export const api = {
     }),
   resetEmailAccount: (id: number) =>
     request<{ message: string }>(`/email-accounts/${id}/reset`, { method: "POST" }),
+  catchUpEmailAccount: (id: number, lookback = 75) =>
+    request<{
+      ok: boolean;
+      message: string;
+      stats: Record<string, number>;
+    }>(`/email-accounts/${id}/catch-up?lookback=${lookback}`, { method: "POST" }),
   syncEmailAccount: (id: number) =>
-      request<{ ok: boolean; stats: Record<string, number> }>(
-        `/email-accounts/${id}/sync`,
+    request<{ ok: boolean; stats: Record<string, number> }>(
+      `/email-accounts/${id}/sync`,
       { method: "POST" }
     ),
+  getSyncProgress: () =>
+    request<SyncProgress>("/email-accounts/sync-progress"),
 };

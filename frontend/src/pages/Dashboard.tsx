@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { Application, ApplicationStatus } from "../api/types";
 import { STATUSES, STATUS_COLORS, STATUS_LABELS } from "../lib/statuses";
@@ -8,24 +8,42 @@ import StatusBadge from "../components/StatusBadge";
 
 type View = "board" | "table";
 
+const HIDDEN_BY_DEFAULT: ApplicationStatus[] = ["rejected", "ghosted"];
+
 function AppCard({
   app,
   onDragStart,
+  mergeMode,
+  selected,
+  onSelect,
 }: {
   app: Application;
   onDragStart: (id: number) => void;
+  mergeMode: boolean;
+  selected: boolean;
+  onSelect: (id: number) => void;
 }) {
   const navigate = useNavigate();
   return (
     <div
-      className="app-card"
-      draggable
+      className={`app-card ${selected ? "app-card-selected" : ""}`}
+      draggable={!mergeMode}
+      style={{ borderLeftColor: STATUS_COLORS[app.status] }}
       onDragStart={(e) => {
+        if (mergeMode) return;
         e.dataTransfer.effectAllowed = "move";
         onDragStart(app.id);
       }}
-      onClick={() => navigate(`/applications/${app.id}`)}
+      onClick={() => {
+        if (mergeMode) onSelect(app.id);
+        else navigate(`/applications/${app.id}`);
+      }}
     >
+      {mergeMode && (
+        <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+          {selected ? "Selected for merge" : "Click to select"}
+        </div>
+      )}
       <h4>{app.title}</h4>
       <div className="company">{app.company}</div>
       {(app.location || app.salary) && (
@@ -40,6 +58,9 @@ function AppCard({
 export default function Dashboard() {
   const [view, setView] = useState<View>("board");
   const [search, setSearch] = useState("");
+  const [hideClosed, setHideClosed] = useState(true);
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergePick, setMergePick] = useState<number[]>([]);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -48,6 +69,12 @@ export default function Dashboard() {
   const { data: apps = [], isLoading } = useQuery({
     queryKey: ["applications", search],
     queryFn: () => api.listApplications({ search: search || undefined }),
+  });
+
+  const { data: reminders = [] } = useQuery({
+    queryKey: ["reminders"],
+    queryFn: () => api.listReminders(),
+    refetchInterval: 120000,
   });
 
   const draggedId = useRef<number | null>(null);
@@ -59,7 +86,22 @@ export default function Dashboard() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["applications"] });
       queryClient.invalidateQueries({ queryKey: ["analytics"] });
+      queryClient.invalidateQueries({ queryKey: ["reminders"] });
     },
+  });
+
+  const mergeMutation = useMutation({
+    mutationFn: ({ source, target }: { source: number; target: number }) =>
+      api.mergeApplications(source, target),
+    onSuccess: (merged) => {
+      setMergePick([]);
+      setMergeMode(false);
+      setImportMsg(`Merged into ${merged.company} — ${merged.title}`);
+      queryClient.invalidateQueries({ queryKey: ["applications"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+      queryClient.invalidateQueries({ queryKey: ["reminders"] });
+    },
+    onError: (e: Error) => setImportMsg(e.message),
   });
 
   const handleDrop = (status: ApplicationStatus) => {
@@ -89,7 +131,51 @@ export default function Dashboard() {
     e.target.value = "";
   };
 
-  const byStatus = (status: string) => apps.filter((a) => a.status === status);
+  const visibleApps = hideClosed
+    ? apps.filter((a) => !HIDDEN_BY_DEFAULT.includes(a.status))
+    : apps;
+
+  const boardStatuses = hideClosed
+    ? STATUSES.filter((s) => !HIDDEN_BY_DEFAULT.includes(s))
+    : STATUSES;
+
+  const byStatus = (status: string) =>
+    visibleApps.filter((a) => a.status === status);
+
+  const onMergeSelect = (id: number) => {
+    setMergePick((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 2) return [prev[1], id];
+      return [...prev, id];
+    });
+  };
+
+  const runMerge = () => {
+    if (mergePick.length !== 2) return;
+    const [a, b] = mergePick;
+    const source = apps.find((x) => x.id === a);
+    const target = apps.find((x) => x.id === b);
+    if (!source || !target) return;
+    // Keep the one with a real title as the target when possible.
+    const sourceIsPlaceholder = !source.title || source.title === "Unknown";
+    const targetIsPlaceholder = !target.title || target.title === "Unknown";
+    let keep = b;
+    let drop = a;
+    if (sourceIsPlaceholder && !targetIsPlaceholder) {
+      keep = b;
+      drop = a;
+    } else if (!sourceIsPlaceholder && targetIsPlaceholder) {
+      keep = a;
+      drop = b;
+    }
+    if (
+      confirm(
+        `Merge "${source.company} — ${source.title}" and "${target.company} — ${target.title}"?\n\nKeeping #${keep}, deleting #${drop}.`
+      )
+    ) {
+      mergeMutation.mutate({ source: drop, target: keep });
+    }
+  };
 
   return (
     <div>
@@ -97,7 +183,11 @@ export default function Dashboard() {
         <div>
           <h1 className="page-title">Dashboard</h1>
           <p className="subtitle">
-            {apps.length} application{apps.length === 1 ? "" : "s"} tracked
+            {visibleApps.length} application
+            {visibleApps.length === 1 ? "" : "s"}
+            {hideClosed && apps.length !== visibleApps.length
+              ? ` (${apps.length - visibleApps.length} closed hidden)`
+              : " tracked"}
           </p>
         </div>
         <div
@@ -128,14 +218,54 @@ export default function Dashboard() {
             style={{ display: "none" }}
             onChange={onImportFile}
           />
+          <button
+            className={mergeMode ? "btn-primary" : "btn-secondary"}
+            onClick={() => {
+              setMergeMode((m) => !m);
+              setMergePick([]);
+            }}
+          >
+            {mergeMode ? "Cancel merge" : "Merge"}
+          </button>
           <button className="btn-primary" onClick={() => navigate("/add")}>
             + Add Application
           </button>
         </div>
       </div>
 
+      {reminders.length > 0 && (
+        <div className="alert alert-info" style={{ marginBottom: 14 }}>
+          <strong>
+            {reminders.length} follow-up
+            {reminders.length === 1 ? "" : "s"} due
+          </strong>
+          <span className="muted" style={{ marginLeft: 8 }}>
+            <Link to="/follow-ups">Open Follow-ups →</Link>
+          </span>
+        </div>
+      )}
+
+      {mergeMode && (
+        <div className="alert alert-info" style={{ marginBottom: 14 }}>
+          Select two applications to merge
+          {mergePick.length === 2 && (
+            <>
+              {" — "}
+              <button
+                className="btn-primary"
+                style={{ marginLeft: 8 }}
+                disabled={mergeMutation.isPending}
+                onClick={runMerge}
+              >
+                Merge selected
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {importMsg && (
-        <div className="alert alert-info" onAnimationEnd={() => setImportMsg(null)}>
+        <div className="alert alert-info" onClick={() => setImportMsg(null)}>
           {importMsg}
         </div>
       )}
@@ -147,6 +277,16 @@ export default function Dashboard() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <label className="switch-row" style={{ margin: 0, gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={hideClosed}
+            onChange={(e) => setHideClosed(e.target.checked)}
+          />
+          <span className="muted" style={{ fontSize: 13 }}>
+            Hide Rejected / Ghosted
+          </span>
+        </label>
         <div className="spacer" />
         <div className="tabs" style={{ margin: 0 }}>
           <button
@@ -175,13 +315,14 @@ export default function Dashboard() {
         </div>
       ) : view === "board" ? (
         <div className="board">
-          {STATUSES.map((status) => {
+          {boardStatuses.map((status) => {
             const items = byStatus(status);
             return (
               <div
                 className={`column ${dragOver === status ? "column-dragover" : ""}`}
                 key={status}
                 onDragOver={(e) => {
+                  if (mergeMode) return;
                   e.preventDefault();
                   if (dragOver !== status) setDragOver(status);
                 }}
@@ -204,6 +345,9 @@ export default function Dashboard() {
                     <AppCard
                       key={app.id}
                       app={app}
+                      mergeMode={mergeMode}
+                      selected={mergePick.includes(app.id)}
+                      onSelect={onMergeSelect}
                       onDragStart={(id) => (draggedId.current = id)}
                     />
                   ))}
@@ -225,10 +369,16 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {apps.map((app) => (
+              {visibleApps.map((app) => (
                 <tr
                   key={app.id}
-                  onClick={() => navigate(`/applications/${app.id}`)}
+                  onClick={() => {
+                    if (mergeMode) onMergeSelect(app.id);
+                    else navigate(`/applications/${app.id}`);
+                  }}
+                  className={
+                    mergePick.includes(app.id) ? "row-selected" : undefined
+                  }
                 >
                   <td>{app.company}</td>
                   <td>{app.title}</td>

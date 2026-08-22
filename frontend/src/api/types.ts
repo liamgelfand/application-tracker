@@ -21,6 +21,7 @@ export interface Application {
   skills: string | null;
   notes: string | null;
   contact_email: string | null;
+  job_id: string | null;
   date_applied: string | null;
   created_at: string;
   updated_at: string;
@@ -35,8 +36,21 @@ export interface StatusEvent {
   created_at: string;
 }
 
+export interface EmailActivity {
+  id: number;
+  kind: "suggestion" | "processed_email" | string;
+  subject: string | null;
+  sender: string | null;
+  snippet: string | null;
+  summary: string | null;
+  suggestion_status: SuggestionStatusType | null;
+  is_job_related: boolean | null;
+  created_at: string;
+}
+
 export interface ApplicationDetail extends Application {
   events: StatusEvent[];
+  related_emails: EmailActivity[];
 }
 
 export interface ParsedJob {
@@ -85,15 +99,51 @@ export interface Suggestion {
   suggested_status: ApplicationStatus | null;
   summary: string | null;
   confidence: number | null;
+  company: string | null;
+  title: string | null;
   email_subject: string | null;
   email_sender: string | null;
   email_snippet: string | null;
   created_at: string;
 }
 
+export interface SuggestionApprovePayload {
+  company?: string | null;
+  title?: string | null;
+  suggested_status?: ApplicationStatus | null;
+}
+
 export interface AppSettings {
   email_poll_interval_seconds: number;
   auto_apply_suggestions: boolean;
+  min_suggestion_confidence: number;
+  follow_up_days: number;
+}
+
+export interface SyncProgress {
+  running: boolean;
+  account_id: number | null;
+  account_name: string | null;
+  phase: string;
+  current: number;
+  total: number;
+  message: string;
+}
+
+export interface HealthStatus {
+  status: string;
+  llm: {
+    configured: boolean;
+    name: string | null;
+    provider: string | null;
+    model: string | null;
+  };
+  email: {
+    accounts: number;
+    active: number;
+    last_synced_at: string | null;
+  };
+  sync: SyncProgress;
 }
 
 export interface Analytics {

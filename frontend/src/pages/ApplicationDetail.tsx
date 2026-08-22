@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
@@ -11,8 +10,6 @@ export default function ApplicationDetail() {
   const appId = Number(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [notes, setNotes] = useState("");
-  const [error, setError] = useState<string | null>(null);
 
   const { data: app, isLoading } = useQuery({
     queryKey: ["application", appId],
@@ -20,25 +17,13 @@ export default function ApplicationDetail() {
     enabled: !!appId,
   });
 
-  useEffect(() => {
-    if (app) setNotes(app.notes ?? "");
-  }, [app?.id]);
-
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["application", appId] });
-    queryClient.invalidateQueries({ queryKey: ["applications"] });
-  };
-
   const statusMutation = useMutation({
     mutationFn: (status: ApplicationStatus) => api.updateStatus(appId, status),
-    onSuccess: invalidate,
-    onError: (e: Error) => setError(e.message),
-  });
-
-  const notesMutation = useMutation({
-    mutationFn: () => api.updateApplication(appId, { notes }),
-    onSuccess: invalidate,
-    onError: (e: Error) => setError(e.message),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["application", appId] });
+      queryClient.invalidateQueries({ queryKey: ["applications"] });
+      queryClient.invalidateQueries({ queryKey: ["reminders"] });
+    },
   });
 
   const deleteMutation = useMutation({
@@ -70,17 +55,29 @@ export default function ApplicationDetail() {
             {app.location ? ` · ${app.location}` : ""}
           </p>
         </div>
-        <button
-          className="btn-danger"
-          onClick={() => {
-            if (confirm("Delete this application?")) deleteMutation.mutate();
-          }}
-        >
-          Delete
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn-primary"
+            onClick={() => navigate(`/applications/${appId}/edit`)}
+          >
+            Edit
+          </button>
+          <button
+            className="btn-danger"
+            onClick={() => {
+              if (confirm("Delete this application?")) deleteMutation.mutate();
+            }}
+          >
+            Delete
+          </button>
+        </div>
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {statusMutation.isError && (
+        <div className="alert alert-error">
+          {(statusMutation.error as Error).message}
+        </div>
+      )}
 
       <div className="row" style={{ alignItems: "flex-start" }}>
         <div className="stack" style={{ flex: 1.4 }}>
@@ -106,6 +103,26 @@ export default function ApplicationDetail() {
           <div className="card">
             <strong>Details</strong>
             <div style={{ marginTop: 12 }} className="stack">
+              <div className="flex-between">
+                <span className="muted">Company</span>
+                <span>{app.company}</span>
+              </div>
+              <div className="flex-between">
+                <span className="muted">Title</span>
+                <span>{app.title}</span>
+              </div>
+              {app.job_id && (
+                <div className="flex-between">
+                  <span className="muted">Job / req ID</span>
+                  <span>{app.job_id}</span>
+                </div>
+              )}
+              {app.location && (
+                <div className="flex-between">
+                  <span className="muted">Location</span>
+                  <span>{app.location}</span>
+                </div>
+              )}
               {app.salary && (
                 <div className="flex-between">
                   <span className="muted">Salary</span>
@@ -158,53 +175,89 @@ export default function ApplicationDetail() {
           </div>
 
           <div className="card">
-            <strong>Notes</strong>
-            <textarea
-              style={{ marginTop: 10 }}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Add private notes about this application..."
-            />
-            <button
-              className="btn-secondary"
-              style={{ marginTop: 10 }}
-              disabled={notesMutation.isPending}
-              onClick={() => notesMutation.mutate()}
-            >
-              {notesMutation.isPending ? "Saving..." : "Save Notes"}
-            </button>
+            <strong>Private notes</strong>
+            {app.notes ? (
+              <p style={{ marginTop: 10, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                {app.notes}
+              </p>
+            ) : (
+              <p className="muted" style={{ marginTop: 10 }}>
+                No notes yet. Use Edit to add some.
+              </p>
+            )}
           </div>
         </div>
 
-        <div className="card" style={{ flex: 1 }}>
-          <strong>Timeline</strong>
-          <ul className="timeline" style={{ marginTop: 12 }}>
-            {app.events.length === 0 && (
-              <li className="muted">No activity yet.</li>
-            )}
-            {app.events.map((ev) => (
-              <li key={ev.id}>
-                <div className="flex-between">
-                  <span>
-                    {ev.from_status && ev.to_status && ev.from_status !== ev.to_status
-                      ? `${STATUS_LABELS[ev.from_status]} → ${STATUS_LABELS[ev.to_status]}`
-                      : ev.to_status
-                      ? STATUS_LABELS[ev.to_status]
-                      : "Update"}
-                  </span>
-                  <span className="pill-source">{ev.source}</span>
-                </div>
-                {ev.note && (
-                  <div className="muted" style={{ marginTop: 4 }}>
-                    {ev.note}
+        <div className="stack" style={{ flex: 1 }}>
+          <div className="card">
+            <strong>Status timeline</strong>
+            <ul className="timeline" style={{ marginTop: 12 }}>
+              {app.events.length === 0 && (
+                <li className="muted">No activity yet.</li>
+              )}
+              {app.events.map((ev) => (
+                <li key={ev.id}>
+                  <div className="flex-between">
+                    <span>
+                      {ev.from_status &&
+                      ev.to_status &&
+                      ev.from_status !== ev.to_status
+                        ? `${STATUS_LABELS[ev.from_status]} → ${STATUS_LABELS[ev.to_status]}`
+                        : ev.to_status
+                          ? STATUS_LABELS[ev.to_status]
+                          : "Update"}
+                    </span>
+                    <span className="pill-source">{ev.source}</span>
                   </div>
-                )}
-                <div className="time">
-                  {new Date(ev.created_at).toLocaleString()}
-                </div>
-              </li>
-            ))}
-          </ul>
+                  {ev.note && (
+                    <div className="muted" style={{ marginTop: 4 }}>
+                      {ev.note}
+                    </div>
+                  )}
+                  <div className="time">
+                    {new Date(ev.created_at).toLocaleString()}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="card">
+            <strong>Email timeline</strong>
+            <p className="muted" style={{ fontSize: 13, margin: "6px 0 0" }}>
+              Related inbox messages for {app.company}.
+            </p>
+            <ul className="timeline" style={{ marginTop: 12 }}>
+              {(app.related_emails?.length ?? 0) === 0 && (
+                <li className="muted">No related emails yet.</li>
+              )}
+              {(app.related_emails ?? []).map((em) => (
+                <li key={`${em.kind}-${em.id}`}>
+                  <div className="flex-between">
+                    <span style={{ fontWeight: 600 }}>
+                      {em.subject || "(no subject)"}
+                    </span>
+                    <span className="pill-source">
+                      {em.kind === "suggestion" ? "suggestion" : "email"}
+                    </span>
+                  </div>
+                  {em.sender && (
+                    <div className="muted" style={{ marginTop: 2, fontSize: 12 }}>
+                      {em.sender}
+                    </div>
+                  )}
+                  {(em.summary || em.snippet) && (
+                    <div className="muted" style={{ marginTop: 4 }}>
+                      {(em.summary || em.snippet || "").slice(0, 200)}
+                    </div>
+                  )}
+                  <div className="time">
+                    {new Date(em.created_at).toLocaleString()}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </div>
     </div>

@@ -44,6 +44,50 @@ def _completion_kwargs(provider: LLMProvider) -> dict:
     return kwargs
 
 
+def _kwargs_from_fields(
+    *,
+    provider: str,
+    model: str,
+    api_key: str | None,
+    api_base: str | None,
+) -> dict:
+    model_str = model if "/" in model else f"{provider}/{model}"
+    kwargs: dict = {"model": model_str}
+    if api_key:
+        kwargs["api_key"] = api_key
+    if provider == "ollama":
+        kwargs["api_base"] = api_base or DEFAULT_OLLAMA_BASE
+    elif api_base:
+        kwargs["api_base"] = api_base
+    return kwargs
+
+
+def test_llm_connection(
+    *,
+    provider: str,
+    model: str,
+    api_key: str | None,
+    api_base: str | None,
+) -> tuple[bool, str]:
+    """Send a tiny completion to verify provider + key + model."""
+    import litellm
+
+    kwargs = _kwargs_from_fields(
+        provider=provider, model=model, api_key=api_key, api_base=api_base
+    )
+    try:
+        response = litellm.completion(
+            messages=[{"role": "user", "content": "Reply with exactly: ok"}],
+            temperature=0,
+            max_tokens=8,
+            **kwargs,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        return True, f"Connected — model responded: {text[:80] or '(empty)'}"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Failed: {exc}"
+
+
 def complete(db: Session, messages: list[dict], *, temperature: float = 0.0) -> str:
     """Run a chat completion against the active provider and return the text."""
     provider = get_active_provider(db)
@@ -52,10 +96,17 @@ def complete(db: Session, messages: list[dict], *, temperature: float = 0.0) -> 
             "No active LLM provider configured. Add one in Settings."
         )
 
+    # Capture connection kwargs while the session is live, then release the
+    # SQLite lock before the (often slow) network call to the model.
+    kwargs = _completion_kwargs(provider)
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+
     # Imported lazily so the app can boot even if litellm has heavy imports.
     import litellm
 
-    kwargs = _completion_kwargs(provider)
     try:
         response = litellm.completion(
             messages=messages, temperature=temperature, **kwargs

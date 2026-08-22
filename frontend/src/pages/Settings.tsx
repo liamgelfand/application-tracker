@@ -16,9 +16,10 @@ const PROVIDER_PRESETS: Record<
   anthropic: {
     label: "Anthropic (Claude)",
     models: [
-      "claude-3-5-sonnet-20241022",
-      "claude-3-5-haiku-20241022",
-      "claude-3-opus-20240229",
+      "claude-haiku-4-5",
+      "claude-sonnet-4-6",
+      "claude-sonnet-5",
+      "claude-opus-4-6",
     ],
     needsKey: true,
   },
@@ -37,7 +38,7 @@ const PROVIDER_PRESETS: Record<
 
 function ProviderModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [provider, setProvider] = useState("openai");
+  const [provider, setProvider] = useState("anthropic");
   const preset = PROVIDER_PRESETS[provider];
   const [name, setName] = useState("");
   const [model, setModel] = useState(preset.models[0]);
@@ -46,13 +47,18 @@ function ProviderModal({ onClose }: { onClose: () => void }) {
   const [apiBase, setApiBase] = useState(preset.apiBase ?? "");
   const [makeActive, setMakeActive] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(
+    null
+  );
+
+  const resolvedModel = customModel.trim() || model;
 
   const create = useMutation({
     mutationFn: () =>
       api.createProvider({
         name: name || preset.label,
         provider,
-        model: customModel || model,
+        model: resolvedModel,
         api_key: apiKey || null,
         api_base: apiBase || null,
         is_active: makeActive,
@@ -64,16 +70,35 @@ function ProviderModal({ onClose }: { onClose: () => void }) {
     onError: (e: Error) => setError(e.message),
   });
 
+  const test = useMutation({
+    mutationFn: () =>
+      api.testProvider({
+        provider,
+        model: resolvedModel,
+        api_key: apiKey || null,
+        api_base: apiBase || null,
+      }),
+    onSuccess: setTestResult,
+    onError: (e: Error) => setTestResult({ ok: false, message: e.message }),
+  });
+
   const onProviderChange = (p: string) => {
     setProvider(p);
     const ps = PROVIDER_PRESETS[p];
     setModel(ps.models[0]);
+    setCustomModel("");
     setApiBase(ps.apiBase ?? "");
+    setTestResult(null);
   };
 
   return (
     <Modal title="Add LLM Provider" onClose={onClose}>
       {error && <div className="alert alert-error">{error}</div>}
+      {testResult && (
+        <div className={`alert ${testResult.ok ? "alert-success" : "alert-error"}`}>
+          {testResult.message}
+        </div>
+      )}
       <div className="field">
         <label>Provider</label>
         <select value={provider} onChange={(e) => onProviderChange(e.target.value)}>
@@ -117,16 +142,16 @@ function ProviderModal({ onClose }: { onClose: () => void }) {
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-..."
+            placeholder="sk-ant-..."
           />
         </div>
       )}
       <div className="field">
-        <label>API Base URL {preset.needsKey ? "(optional)" : ""}</label>
+        <label>API Base URL {preset.needsKey ? "(leave blank for Anthropic/OpenAI)" : ""}</label>
         <input
           value={apiBase}
           onChange={(e) => setApiBase(e.target.value)}
-          placeholder={preset.apiBase ?? "https://..."}
+          placeholder={preset.apiBase ?? "leave blank"}
         />
       </div>
       <div className="switch-row">
@@ -145,8 +170,15 @@ function ProviderModal({ onClose }: { onClose: () => void }) {
           Cancel
         </button>
         <button
+          className="btn-secondary"
+          disabled={test.isPending}
+          onClick={() => test.mutate()}
+        >
+          {test.isPending ? "Testing..." : "Test"}
+        </button>
+        <button
           className="btn-primary"
-          disabled={create.isPending}
+          disabled={create.isPending || (testResult !== null && !testResult.ok)}
           onClick={() => create.mutate()}
         >
           {create.isPending ? "Adding..." : "Add Provider"}
@@ -328,6 +360,11 @@ export default function Settings() {
     mutationFn: (id: number) => api.activateProvider(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["providers"] }),
   });
+  const testSaved = useMutation({
+    mutationFn: (id: number) => api.testSavedProvider(id),
+    onSuccess: (res) => window.alert(res.message),
+    onError: (e: Error) => window.alert(e.message),
+  });
   const deleteProvider = useMutation({
     mutationFn: (id: number) => api.deleteProvider(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["providers"] }),
@@ -343,6 +380,15 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ["suggestions"] });
     },
   });
+  const catchUpAccount = useMutation({
+    mutationFn: (id: number) => api.catchUpEmailAccount(id, 75),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["emailAccounts"] });
+      queryClient.invalidateQueries({ queryKey: ["suggestions"] });
+      window.alert(res.message);
+    },
+    onError: (e: Error) => window.alert(e.message),
+  });
   const resetAccount = useMutation({
     mutationFn: async (id: number) => {
       await api.resetEmailAccount(id);
@@ -353,6 +399,12 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ["suggestions"] });
     },
   });
+  const { data: syncProgress } = useQuery({
+    queryKey: ["syncProgress"],
+    queryFn: () => api.getSyncProgress(),
+    refetchInterval: (q) => (q.state.data?.running ? 800 : 4000),
+  });
+
   const toggleAutoApply = useMutation({
     mutationFn: (value: boolean) =>
       api.updateSettings({ auto_apply_suggestions: value }),
@@ -362,6 +414,19 @@ export default function Settings() {
     mutationFn: (seconds: number) =>
       api.updateSettings({ email_poll_interval_seconds: seconds }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["settings"] }),
+  });
+  const setConfidence = useMutation({
+    mutationFn: (value: number) =>
+      api.updateSettings({ min_suggestion_confidence: value }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["settings"] }),
+  });
+  const setFollowUp = useMutation({
+    mutationFn: (value: number) =>
+      api.updateSettings({ follow_up_days: value }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      queryClient.invalidateQueries({ queryKey: ["reminders"] });
+    },
   });
 
   const INTERVAL_OPTIONS = [
@@ -381,6 +446,22 @@ export default function Settings() {
         </div>
       </div>
 
+      {(syncProgress?.running || syncProgress?.phase === "done" || syncProgress?.phase === "error") && (
+        <div
+          className={`alert ${syncProgress.phase === "error" ? "alert-error" : "alert-info"}`}
+          style={{ marginBottom: 16 }}
+        >
+          {syncProgress.running
+            ? syncProgress.message || "Syncing…"
+            : syncProgress.message}
+          {syncProgress.running && syncProgress.total > 0 && (
+            <span className="muted" style={{ marginLeft: 8 }}>
+              ({syncProgress.current}/{syncProgress.total})
+            </span>
+          )}
+        </div>
+      )}
+
       {/* LLM providers */}
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="flex-between" style={{ marginBottom: 14 }}>
@@ -393,6 +474,12 @@ export default function Settings() {
           <button className="btn-primary" onClick={() => setShowProviderModal(true)}>
             + Add Provider
           </button>
+        </div>
+        <div className="alert alert-info" style={{ marginBottom: 14 }}>
+          <strong>Cloud tip:</strong> Local Ollama is free but slow on CPU. For
+          faster email analysis, add OpenAI (<code>gpt-4o-mini</code>) or
+          Anthropic (<code>claude-3-5-haiku</code>) with your own API key — typically
+          a few cents per inbox sync.
         </div>
         {providers.length === 0 ? (
           <p className="muted">
@@ -422,7 +509,14 @@ export default function Settings() {
                       {p.has_api_key ? " · key saved" : ""}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      className="btn-secondary"
+                      disabled={testSaved.isPending}
+                      onClick={() => testSaved.mutate(p.id)}
+                    >
+                      {testSaved.isPending ? "Testing..." : "Test"}
+                    </button>
                     {!p.is_active && (
                       <button
                         className="btn-secondary"
@@ -480,7 +574,7 @@ export default function Settings() {
                         : "Not synced yet"}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button
                       className="btn-secondary"
                       disabled={syncAccount.isPending}
@@ -489,16 +583,28 @@ export default function Settings() {
                       {syncAccount.isPending ? "Syncing..." : "Sync Now"}
                     </button>
                     <button
+                      className="btn-primary"
+                      title="Re-scan recent mail. Already-classified emails are skipped (no Claude cost)."
+                      disabled={catchUpAccount.isPending}
+                      onClick={() => catchUpAccount.mutate(a.id)}
+                    >
+                      {catchUpAccount.isPending ? "Catching up…" : "Catch up missed"}
+                    </button>
+                    <button
                       className="btn-secondary"
-                      title="Clear processed history and re-analyze recent mail. Use if an email was missed."
+                      title="Deletes the last 10 processed markers and re-runs Claude on them. Costs credits."
                       disabled={resetAccount.isPending}
                       onClick={() => {
-                        if (confirm("Re-analyze all recent mail for this inbox? This will re-run AI classification on emails already seen.")) {
+                        if (
+                          confirm(
+                            "Re-analyze the last 10 emails with Claude again? This spends API credits on mail you already classified. Prefer Catch up missed if you only need gaps."
+                          )
+                        ) {
                           resetAccount.mutate(a.id);
                         }
                       }}
                     >
-                      Re-analyze
+                      Re-analyze (costs credits)
                     </button>
                     <button
                       className="btn-danger"
@@ -570,6 +676,46 @@ export default function Settings() {
                   Every {settings.email_poll_interval_seconds} seconds
                 </option>
               )}
+          </select>
+        </div>
+        <div className="flex-between" style={{ marginTop: 18 }}>
+          <div>
+            <div>Minimum suggestion confidence</div>
+            <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
+              Emails below this score are marked processed but skipped — no
+              review-queue item is created.
+            </p>
+          </div>
+          <select
+            style={{ maxWidth: 140 }}
+            value={settings?.min_suggestion_confidence ?? 70}
+            onChange={(e) => setConfidence.mutate(Number(e.target.value))}
+          >
+            {[50, 60, 70, 80, 90].map((v) => (
+              <option key={v} value={v}>
+                {v}%
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-between" style={{ marginTop: 18 }}>
+          <div>
+            <div>Follow-up reminder after</div>
+            <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
+              Highlight Applied / Phone Screen / Interview apps with no update
+              for this many days.
+            </p>
+          </div>
+          <select
+            style={{ maxWidth: 140 }}
+            value={settings?.follow_up_days ?? 14}
+            onChange={(e) => setFollowUp.mutate(Number(e.target.value))}
+          >
+            {[7, 10, 14, 21, 30].map((v) => (
+              <option key={v} value={v}>
+                {v} days
+              </option>
+            ))}
           </select>
         </div>
       </div>
