@@ -3,12 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { Application, ApplicationStatus } from "../api/types";
-import { STATUSES, STATUS_COLORS, STATUS_LABELS } from "../lib/statuses";
+import { STATUSES, STATUS_COLORS, STATUS_LABELS, DEFAULT_HIDDEN_BOARD_STATUSES } from "../lib/statuses";
 import StatusBadge from "../components/StatusBadge";
 
 type View = "board" | "table";
-
-const HIDDEN_BY_DEFAULT: ApplicationStatus[] = ["rejected", "ghosted"];
 
 function AppCard({
   app,
@@ -58,7 +56,6 @@ function AppCard({
 export default function Dashboard() {
   const [view, setView] = useState<View>("board");
   const [search, setSearch] = useState("");
-  const [hideClosed, setHideClosed] = useState(true);
   const [mergeMode, setMergeMode] = useState(false);
   const [mergePick, setMergePick] = useState<number[]>([]);
   const navigate = useNavigate();
@@ -76,6 +73,13 @@ export default function Dashboard() {
     queryFn: () => api.listReminders(),
     refetchInterval: 120000,
   });
+
+  const { data: settings } = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api.getSettings(),
+  });
+
+  const hiddenStatuses = settings?.hidden_board_statuses ?? DEFAULT_HIDDEN_BOARD_STATUSES;
 
   const draggedId = useRef<number | null>(null);
   const [dragOver, setDragOver] = useState<ApplicationStatus | null>(null);
@@ -131,13 +135,9 @@ export default function Dashboard() {
     e.target.value = "";
   };
 
-  const visibleApps = hideClosed
-    ? apps.filter((a) => !HIDDEN_BY_DEFAULT.includes(a.status))
-    : apps;
+  const visibleApps = apps.filter((a) => !hiddenStatuses.includes(a.status));
 
-  const boardStatuses = hideClosed
-    ? STATUSES.filter((s) => !HIDDEN_BY_DEFAULT.includes(s))
-    : STATUSES;
+  const boardStatuses = STATUSES.filter((s) => !hiddenStatuses.includes(s));
 
   const byStatus = (status: string) =>
     visibleApps.filter((a) => a.status === status);
@@ -185,9 +185,15 @@ export default function Dashboard() {
           <p className="subtitle">
             {visibleApps.length} application
             {visibleApps.length === 1 ? "" : "s"}
-            {hideClosed && apps.length !== visibleApps.length
-              ? ` (${apps.length - visibleApps.length} closed hidden)`
-              : " tracked"}
+            {apps.length !== visibleApps.length ? (
+              <>
+                {" "}
+                ({apps.length - visibleApps.length} hidden) ·{" "}
+                <Link to="/settings#board-columns">Column visibility</Link>
+              </>
+            ) : (
+              " tracked"
+            )}
           </p>
         </div>
         <div
@@ -277,16 +283,6 @@ export default function Dashboard() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <label className="switch-row" style={{ margin: 0, gap: 8 }}>
-          <input
-            type="checkbox"
-            checked={hideClosed}
-            onChange={(e) => setHideClosed(e.target.checked)}
-          />
-          <span className="muted" style={{ fontSize: 13 }}>
-            Hide Rejected / Ghosted
-          </span>
-        </label>
         <div className="spacer" />
         <div className="tabs" style={{ margin: 0 }}>
           <button

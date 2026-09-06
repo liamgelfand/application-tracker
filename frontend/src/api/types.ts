@@ -1,6 +1,7 @@
 export type ApplicationStatus =
   | "saved"
   | "applied"
+  | "online_assessment"
   | "phone_screen"
   | "interview"
   | "offer"
@@ -118,6 +119,7 @@ export interface AppSettings {
   auto_apply_suggestions: boolean;
   min_suggestion_confidence: number;
   follow_up_days: number;
+  hidden_board_statuses: ApplicationStatus[];
 }
 
 export interface SyncProgress {

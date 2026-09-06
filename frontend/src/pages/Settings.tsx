@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { EmailAccount, LLMProvider } from "../api/types";
+import type { ApplicationStatus, EmailAccount, LLMProvider } from "../api/types";
+import { DEFAULT_HIDDEN_BOARD_STATUSES, STATUSES, STATUS_COLORS, STATUS_LABELS } from "../lib/statuses";
 import Modal from "../components/Modal";
 
 const PROVIDER_PRESETS: Record<
@@ -428,6 +429,14 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ["reminders"] });
     },
   });
+  const setHiddenColumns = useMutation({
+    mutationFn: (hidden: ApplicationStatus[]) =>
+      api.updateSettings({ hidden_board_statuses: hidden }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      queryClient.invalidateQueries({ queryKey: ["applications"] });
+    },
+  });
 
   const INTERVAL_OPTIONS = [
     { label: "Every 5 minutes", value: 300 },
@@ -442,7 +451,7 @@ export default function Settings() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Settings</h1>
-          <p className="subtitle">Configure AI providers and monitored inboxes.</p>
+          <p className="subtitle">Configure AI providers, inboxes, and the dashboard.</p>
         </div>
       </div>
 
@@ -620,7 +629,42 @@ export default function Settings() {
         )}
       </div>
 
-      {/* Preferences */}
+      <div className="card" id="board-columns" style={{ marginBottom: 20 }}>
+        <strong>Dashboard columns</strong>
+        <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+          Choose which statuses appear on the board and table. Hidden columns stay
+          in the tracker, analytics, and follow-ups.
+        </p>
+        <div className="board-column-picker">
+          {STATUSES.map((status) => {
+            const hidden =
+              settings?.hidden_board_statuses ?? DEFAULT_HIDDEN_BOARD_STATUSES;
+            const shown = !hidden.includes(status);
+            const visibleCount = STATUSES.length - hidden.length;
+            return (
+              <label className="board-column-option" key={status}>
+                <input
+                  type="checkbox"
+                  checked={shown}
+                  disabled={shown && visibleCount <= 1}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? hidden.filter((s) => s !== status)
+                      : [...hidden, status];
+                    setHiddenColumns.mutate(next);
+                  }}
+                />
+                <span
+                  className="status-dot"
+                  style={{ background: STATUS_COLORS[status] }}
+                />
+                {STATUS_LABELS[status]}
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="card">
         <strong>Preferences</strong>
         <div className="flex-between" style={{ marginTop: 14 }}>
@@ -702,8 +746,8 @@ export default function Settings() {
           <div>
             <div>Follow-up reminder after</div>
             <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
-              Highlight Applied / Phone Screen / Interview apps with no update
-              for this many days.
+              Highlight Applied / Online Assessment / Phone Screen / Interview
+              apps with no update for this many days.
             </p>
           </div>
           <select

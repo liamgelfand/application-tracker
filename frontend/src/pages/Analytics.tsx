@@ -62,7 +62,7 @@ export default function Analytics() {
             <StatCard
               label="Interview rate"
               value={`${data.interview_rate}%`}
-              hint="Reached phone screen or beyond"
+              hint="Reached phone screen or later"
             />
             <StatCard
               label="Offer rate"

@@ -22,6 +22,15 @@ def test_analytics_rates(client):
     assert len(data["over_time"]) == 8
 
 
+def test_online_assessment_is_a_response_not_an_interview(client):
+    _create(client, "A", "applied")
+    _create(client, "B", "online_assessment")
+    data = client.get("/api/analytics").json()
+    assert data["status_counts"]["online_assessment"] == 1
+    assert data["response_rate"] == 50.0
+    assert data["interview_rate"] == 0.0
+
+
 def test_analytics_empty(client):
     data = client.get("/api/analytics").json()
     assert data["total"] == 0

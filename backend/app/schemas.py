@@ -238,6 +238,13 @@ class SettingsOut(BaseModel):
     auto_apply_suggestions: bool
     min_suggestion_confidence: int = 70
     follow_up_days: int = 14
+    hidden_board_statuses: list[ApplicationStatus] = Field(
+        default_factory=lambda: [
+            ApplicationStatus.phone_screen,
+            ApplicationStatus.rejected,
+            ApplicationStatus.ghosted,
+        ]
+    )
 
 
 class SettingsUpdate(BaseModel):
@@ -245,6 +252,7 @@ class SettingsUpdate(BaseModel):
     email_poll_interval_seconds: int | None = None
     min_suggestion_confidence: int | None = None
     follow_up_days: int | None = None
+    hidden_board_statuses: list[ApplicationStatus] | None = None
 
 
 class SyncProgressOut(BaseModel):

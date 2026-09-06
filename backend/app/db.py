@@ -44,6 +44,7 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _migrate_sqlite_columns()
+    _run_data_backfills()
 
 
 def _migrate_sqlite_columns() -> None:
@@ -57,3 +58,14 @@ def _migrate_sqlite_columns() -> None:
             conn.exec_driver_sql(
                 "ALTER TABLE applications ADD COLUMN job_id VARCHAR(128)"
             )
+
+
+def _run_data_backfills() -> None:
+    """Idempotent row updates that run once after schema migrations."""
+    from .services.oa_backfill import run_online_assessment_backfill
+
+    db = SessionLocal()
+    try:
+        run_online_assessment_backfill(db)
+    finally:
+        db.close()

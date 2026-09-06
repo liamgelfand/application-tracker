@@ -4,8 +4,8 @@ import StatusBadge from "./StatusBadge";
 
 describe("StatusBadge", () => {
   it("renders the human-readable label", () => {
-    render(<StatusBadge status="phone_screen" />);
-    expect(screen.getByText("Phone Screen")).toBeInTheDocument();
+    render(<StatusBadge status="online_assessment" />);
+    expect(screen.getByText("Online Assessment")).toBeInTheDocument();
   });
 
   it("renders a different label per status", () => {

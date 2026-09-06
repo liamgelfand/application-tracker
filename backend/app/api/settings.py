@@ -23,10 +23,12 @@ from ..services.llm.service import test_llm_connection
 from ..services.settings_service import (
     get_auto_apply,
     get_follow_up_days,
+    get_hidden_board_statuses,
     get_min_confidence,
     get_poll_interval,
     set_auto_apply,
     set_follow_up_days,
+    set_hidden_board_statuses,
     set_min_confidence,
     set_poll_interval,
 )
@@ -56,6 +58,7 @@ def _settings_out(db: Session) -> SettingsOut:
         auto_apply_suggestions=get_auto_apply(db),
         min_suggestion_confidence=get_min_confidence(db),
         follow_up_days=get_follow_up_days(db),
+        hidden_board_statuses=get_hidden_board_statuses(db),
     )
 
 
@@ -80,6 +83,11 @@ def update_settings(
         set_min_confidence(db, payload.min_suggestion_confidence)
     if payload.follow_up_days is not None:
         set_follow_up_days(db, payload.follow_up_days)
+    if payload.hidden_board_statuses is not None:
+        try:
+            set_hidden_board_statuses(db, payload.hidden_board_statuses)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _settings_out(db)
 
 

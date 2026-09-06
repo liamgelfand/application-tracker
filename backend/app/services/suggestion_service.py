@@ -17,6 +17,7 @@ from ..models import (
     SuggestionStatus,
 )
 from .email.prefilter import is_otp_or_verification
+from .status_inference import refine_suggested_status
 
 # Prefer explicit numeric "12345 - Role" (IBM-style) before looser labels.
 _JOB_ID_PATTERNS = [
@@ -163,11 +164,22 @@ def _company_from_sender(sender: str | None) -> str | None:
     return sender.strip() or None
 
 
+_STATUS_ALIASES = {
+    "assessment": "online_assessment",
+    "online assessment": "online_assessment",
+    "online_assessment": "online_assessment",
+    "oa": "online_assessment",
+    "coding_assessment": "online_assessment",
+}
+
+
 def _coerce_status(value: str | None) -> ApplicationStatus | None:
     if not value:
         return None
+    raw = value.strip().lower().replace("-", "_")
+    raw = _STATUS_ALIASES.get(raw, raw)
     try:
-        return ApplicationStatus(value)
+        return ApplicationStatus(raw)
     except ValueError:
         return None
 
@@ -275,11 +287,31 @@ def build_suggestion_from_analysis(
     except ValueError:
         kind = SuggestionKind.note
 
-    suggested_status = _coerce_status(analysis.get("suggested_status"))
+    suggested_status = refine_suggested_status(
+        _coerce_status(analysis.get("suggested_status")),
+        subject,
+        analysis.get("summary"),
+        snippet,
+    )
     company = analysis.get("company") or _company_from_sender(sender)
     title = analysis.get("title")
     if _is_placeholder_title(title):
         title = None
+
+    if (
+        suggested_status is not None
+        and kind == SuggestionKind.note
+        and suggested_status
+        in {
+            ApplicationStatus.rejected,
+            ApplicationStatus.online_assessment,
+            ApplicationStatus.phone_screen,
+            ApplicationStatus.interview,
+            ApplicationStatus.offer,
+        }
+    ):
+        kind = SuggestionKind.status_change
+
 
     job_id = analysis.get("job_id") or extract_job_id(subject, snippet)
     if isinstance(job_id, str):
@@ -350,6 +382,20 @@ def apply_suggestion(
     suggestion.payload = json.dumps(payload)
     if status_override is not None:
         suggestion.suggested_status = status_override
+    else:
+        refined = refine_suggested_status(
+            suggestion.suggested_status,
+            suggestion.email_subject,
+            suggestion.summary,
+            suggestion.email_snippet,
+        )
+        if refined is not None:
+            suggestion.suggested_status = refined
+            if (
+                suggestion.kind == SuggestionKind.note
+                and refined != ApplicationStatus.applied
+            ):
+                suggestion.kind = SuggestionKind.status_change
 
     company = payload.get("company") or _company_from_sender(suggestion.email_sender)
     title = payload.get("title")

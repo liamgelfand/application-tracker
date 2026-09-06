@@ -4,6 +4,11 @@ def test_default_settings(client):
     assert data["email_poll_interval_seconds"] == 900
     assert data["min_suggestion_confidence"] == 70
     assert data["follow_up_days"] == 14
+    assert data["hidden_board_statuses"] == [
+        "phone_screen",
+        "rejected",
+        "ghosted",
+    ]
 
 
 def test_update_confidence_and_follow_up(client):
@@ -35,6 +40,28 @@ def test_poll_interval_update_and_clamp(client):
         ).json()["email_poll_interval_seconds"]
         == 60
     )
+
+
+def test_hidden_board_statuses(client):
+    shown = client.patch(
+        "/api/settings",
+        json={"hidden_board_statuses": ["rejected"]},
+    ).json()["hidden_board_statuses"]
+    assert shown == ["rejected"]
+
+    all_hidden = [
+        "saved",
+        "applied",
+        "online_assessment",
+        "phone_screen",
+        "interview",
+        "offer",
+        "rejected",
+        "ghosted",
+        "accepted",
+    ]
+    r = client.patch("/api/settings", json={"hidden_board_statuses": all_hidden})
+    assert r.status_code == 400
 
 
 def test_parse_without_provider_returns_409(client):

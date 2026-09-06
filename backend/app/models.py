@@ -24,6 +24,7 @@ def _now() -> datetime:
 class ApplicationStatus(str, enum.Enum):
     saved = "saved"
     applied = "applied"
+    online_assessment = "online_assessment"
     phone_screen = "phone_screen"
     interview = "interview"
     offer = "offer"
@@ -61,7 +62,9 @@ class Application(Base):
     source: Mapped[str | None] = mapped_column(String(255), nullable=True)
     salary: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[ApplicationStatus] = mapped_column(
-        Enum(ApplicationStatus), default=ApplicationStatus.saved, index=True
+        Enum(ApplicationStatus, native_enum=False, length=32),
+        default=ApplicationStatus.saved,
+        index=True,
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     skills: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated
@@ -92,10 +95,10 @@ class StatusEvent(Base):
         ForeignKey("applications.id", ondelete="CASCADE"), index=True
     )
     from_status: Mapped[ApplicationStatus | None] = mapped_column(
-        Enum(ApplicationStatus), nullable=True
+        Enum(ApplicationStatus, native_enum=False, length=32), nullable=True
     )
     to_status: Mapped[ApplicationStatus | None] = mapped_column(
-        Enum(ApplicationStatus), nullable=True
+        Enum(ApplicationStatus, native_enum=False, length=32), nullable=True
     )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[EventSource] = mapped_column(Enum(EventSource), default=EventSource.manual)
@@ -149,7 +152,7 @@ class Suggestion(Base):
         Enum(SuggestionStatus), default=SuggestionStatus.pending, index=True
     )
     suggested_status: Mapped[ApplicationStatus | None] = mapped_column(
-        Enum(ApplicationStatus), nullable=True
+        Enum(ApplicationStatus, native_enum=False, length=32), nullable=True
     )
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON string

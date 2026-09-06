@@ -60,7 +60,7 @@ DEMO_APPS = [
         location="New York, NY",
         salary="$170k-$210k",
         source="Company site",
-        status=ApplicationStatus.applied,
+        status=ApplicationStatus.online_assessment,
         skills="React, Node.js, PostgreSQL",
         description="Help build the connected workspace for docs, wikis, and projects.",
     ),

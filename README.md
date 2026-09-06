@@ -35,7 +35,7 @@ Track your job search end to end. Paste a job listing and AI fills in the detail
 
 ## Features
 
-- **Kanban board + table** to track applications across stages: Saved, Applied, Phone Screen, Interview, Offer, Rejected, Ghosted, Accepted.
+- **Kanban board + table** to track applications across stages: Saved, Applied, Online Assessment, Phone Screen, Interview, Offer, Rejected, Ghosted, Accepted.
 - **Paste-to-add**: paste any job listing and an LLM extracts the company, title, location, salary, URL, skills, and a summary. Review, then save.
 - **Browser extension**: capture the job listing on the page you're viewing in one click (see [`extension/`](extension/)).
 - **Inbox monitoring (IMAP)**: connect any email provider. A background job reads new mail, detects job-related messages (confirmations, recruiter outreach, interview invites, rejections), matches them to your applications, and proposes updates.

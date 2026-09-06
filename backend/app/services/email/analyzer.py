@@ -62,13 +62,18 @@ Think step by step (internally), then respond with ONLY a JSON object:
   "confidence": number             // 0-100
 }}
 
-Status guidance for new_application:
-- Application confirmation / receipt → "applied"
-- Interview invite or scheduling → "interview"
-- Phone screen / recruiter call / assessment invite → "phone_screen"
-- Offer letter → "offer"
-- Rejection → "rejected"
-- Cold recruiter outreach (not yet applied) → "saved"
+Status guidance (pipeline order: applied → online_assessment → phone_screen → interview → offer):
+- Application confirmation / receipt → kind=new_application, suggested_status="applied"
+- Coding test / HireVue / CodeSignal / Coderbyte / HackerRank / take-home / "complete your assessment" / digital screen / on-demand video interview → suggested_status="online_assessment" (NOT phone_screen)
+- Recruiter call / live phone screen → suggested_status="phone_screen"
+- Live interview invite or scheduling (not a recorded/on-demand screen) → suggested_status="interview"
+- Offer letter → suggested_status="offer"
+- Rejection / not moving forward / other candidates → kind=status_change, suggested_status="rejected"
+- Cold recruiter outreach (not yet applied) → kind=new_application, suggested_status="saved"
+
+CRITICAL: If the email is a rejection (or any clear status update), you MUST set
+suggested_status to the matching status value. Never leave suggested_status null
+when kind is status_change — a null status only adds a note and does not update the board.
 """
 
 

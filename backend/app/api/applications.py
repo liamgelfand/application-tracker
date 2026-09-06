@@ -157,6 +157,7 @@ def _coerce_date(value: str | None) -> datetime | None:
 
 _FOLLOW_UP_STATUSES = {
     ApplicationStatus.applied,
+    ApplicationStatus.online_assessment,
     ApplicationStatus.phone_screen,
     ApplicationStatus.interview,
 }
@@ -166,6 +167,23 @@ def _normalize_company(text: str) -> str:
     text = text.lower()
     text = re.sub(r"[^a-z0-9 ]", "", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+# Too generic to safely substring-match against all inbox subjects.
+_GENERIC_COMPANY_MATCH = {
+    "entry",
+    "level",
+    "software",
+    "engineer",
+    "intern",
+    "new",
+    "grad",
+    "team",
+    "careers",
+    "jobs",
+    "hr",
+    "talent",
+}
 
 
 def _related_emails(db: Session, app: Application) -> list[EmailActivityOut]:
@@ -190,9 +208,9 @@ def _related_emails(db: Session, app: Application) -> list[EmailActivityOut]:
             )
         )
 
-    # Also surface processed emails that mention this company (per-company timeline).
+    # Fuzzy inbox match only for distinctive company names (never "Entry").
     norm = _normalize_company(app.company or "")
-    if norm and len(norm) >= 3:
+    if norm and len(norm) >= 5 and norm not in _GENERIC_COMPANY_MATCH:
         recent = db.execute(
             select(ProcessedEmail)
             .where(ProcessedEmail.is_job_related.is_(True))
@@ -202,9 +220,11 @@ def _related_emails(db: Session, app: Application) -> list[EmailActivityOut]:
         seen_subjects = {
             (i.subject or "").strip().lower() for i in items if i.subject
         }
+        # Prefer whole-token match so "entry" doesn't hit "entry-level" spam.
+        token = re.compile(rf"\b{re.escape(norm)}\b", re.IGNORECASE)
         for pe in recent:
             blob = f"{pe.subject or ''} {pe.sender or ''}"
-            if norm not in _normalize_company(blob):
+            if not token.search(_normalize_company(blob)) and not token.search(blob):
                 continue
             key = (pe.subject or "").strip().lower()
             if key and key in seen_subjects:

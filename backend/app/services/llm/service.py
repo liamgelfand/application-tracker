@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from sqlalchemy import select
@@ -10,6 +11,22 @@ from ...core.security import decrypt
 from ...models import LLMProvider
 
 DEFAULT_OLLAMA_BASE = "http://localhost:11434"
+
+_litellm_quieted = False
+
+
+def _quiet_litellm() -> None:
+    """LiteLLM prints each call twice (its own format + root logger). Mute the noise."""
+    global _litellm_quieted
+    if _litellm_quieted:
+        return
+    import litellm
+
+    litellm.suppress_debug_info = True
+    litellm.set_verbose = False
+    for name in ("LiteLLM", "litellm", "httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    _litellm_quieted = True
 
 
 class LLMError(Exception):
@@ -72,6 +89,7 @@ def test_llm_connection(
     """Send a tiny completion to verify provider + key + model."""
     import litellm
 
+    _quiet_litellm()
     kwargs = _kwargs_from_fields(
         provider=provider, model=model, api_key=api_key, api_base=api_base
     )
@@ -107,6 +125,7 @@ def complete(db: Session, messages: list[dict], *, temperature: float = 0.0) -> 
     # Imported lazily so the app can boot even if litellm has heavy imports.
     import litellm
 
+    _quiet_litellm()
     try:
         response = litellm.completion(
             messages=messages, temperature=temperature, **kwargs

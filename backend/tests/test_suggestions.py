@@ -89,6 +89,42 @@ def test_approve_with_overrides(client):
     assert match[0]["title"] == "Backend Engineer"
 
 
+def test_approve_assessment_email_uses_online_assessment(client):
+    app = client.post(
+        "/api/applications",
+        json={
+            "company": "IBM",
+            "title": "SWE Intern",
+            "status": "applied",
+            "job_id": "129919",
+        },
+    ).json()
+    db = SessionLocal()
+    try:
+        s = Suggestion(
+            application_id=app["id"],
+            kind=SuggestionKind.status_change,
+            status=SuggestionStatus.pending,
+            suggested_status=ApplicationStatus.phone_screen,
+            summary="IBM invited you to complete a coding assessment; update to phone_screen.",
+            confidence=90,
+            payload='{"company": "IBM", "title": "SWE Intern", "job_id": "129919"}',
+            email_subject="Action Required:IBM Coding Assessment for completion Liam - 129919 - SWE Intern",
+            email_sender="talent@ibm.com",
+            email_snippet="Please complete your coding assessment within 7 days.",
+        )
+        db.add(s)
+        db.commit()
+        sid = s.id
+    finally:
+        db.close()
+
+    r = client.post(f"/api/suggestions/{sid}/approve")
+    assert r.status_code == 200
+    updated = client.get(f"/api/applications/{app['id']}").json()
+    assert updated["status"] == "online_assessment"
+
+
 def test_bulk_reject(client):
     app = client.post(
         "/api/applications",

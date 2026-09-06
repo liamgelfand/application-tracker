@@ -13,6 +13,7 @@ from ..models import Application, ApplicationStatus, StatusEvent
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
 RESPONDED = {
+    ApplicationStatus.online_assessment,
     ApplicationStatus.phone_screen,
     ApplicationStatus.interview,
     ApplicationStatus.offer,

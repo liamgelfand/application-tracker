@@ -55,8 +55,8 @@ export default function FollowUps() {
         <div>
           <h1 className="page-title">Follow-ups</h1>
           <p className="subtitle">
-            Applications in Applied / Phone Screen / Interview with no update
-            for {threshold}+ days.
+            Applications in Applied / Online Assessment / Phone Screen /
+            Interview with no update for {threshold}+ days.
           </p>
         </div>
         {reminders.length > 0 && (

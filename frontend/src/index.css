@@ -496,6 +496,23 @@ tbody tr:last-child td { border-bottom: none; }
 .switch-row { display: flex; align-items: center; gap: 10px; }
 .switch-row input { width: auto; }
 
+.board-column-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px 14px;
+  margin-top: 14px;
+}
+.board-column-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+.board-column-option input { width: auto; margin: 0; }
+#board-columns { scroll-margin-top: 16px; }
+
 /* ─── Analytics ──────────────────────────────────────────────── */
 .stat-grid {
   display: grid;
@@ -516,7 +533,7 @@ tbody tr:last-child td { border-bottom: none; }
 
 .bar-row { display: flex; align-items: center; gap: 10px; }
 .bar-label {
-  width: 110px;
+  width: 140px;
   font-size: 12px;
   color: var(--text-muted);
   flex-shrink: 0;
