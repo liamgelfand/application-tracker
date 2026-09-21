@@ -8,17 +8,33 @@ Build from the repo root:
 """
 from pathlib import Path
 
-ROOT = Path(SPECPATH).parent  # backend/
-PROJECT = ROOT.parent
-FRONTEND_DIST = PROJECT / "frontend" / "dist"
+# SPECPATH is the directory holding this file, but PyInstaller has reported it
+# differently across versions — locate the backend directory by its contents.
+_spec_dir = Path(SPECPATH).resolve()
+if (_spec_dir / "launcher.py").exists():
+    BACKEND = _spec_dir
+elif (_spec_dir / "backend" / "launcher.py").exists():
+    BACKEND = _spec_dir / "backend"
+else:
+    raise SystemExit(f"Cannot locate backend/launcher.py relative to {_spec_dir}")
 
-datas = []
-if FRONTEND_DIST.is_dir():
-    datas.append((str(FRONTEND_DIST), "frontend/dist"))
+PROJECT = BACKEND.parent
+FRONTEND_DIST = PROJECT / "frontend" / "dist"
+ICON = BACKEND / "assets" / "icon.ico"
+
+if not FRONTEND_DIST.is_dir():
+    raise SystemExit(
+        "frontend/dist is missing — run `npm run build` in frontend/ first, "
+        "otherwise the packaged app has no UI to serve."
+    )
+
+datas = [(str(FRONTEND_DIST), "frontend/dist")]
+if ICON.exists():
+    datas.append((str(ICON), "assets"))
 
 a = Analysis(
-    [str(ROOT / "launcher.py")],
-    pathex=[str(ROOT)],
+    [str(BACKEND / "launcher.py")],
+    pathex=[str(BACKEND)],
     binaries=[],
     datas=datas,
     hiddenimports=[
@@ -35,6 +51,7 @@ a = Analysis(
         "app.main",
         "app.api.applications",
         "app.api.analytics",
+        "app.api.backup",
         "app.api.emails",
         "app.api.parse",
         "app.api.settings",
@@ -68,4 +85,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(ICON) if ICON.exists() else None,
 )

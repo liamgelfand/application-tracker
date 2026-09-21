@@ -59,6 +59,13 @@ def _migrate_sqlite_columns() -> None:
                 "ALTER TABLE applications ADD COLUMN job_id VARCHAR(128)"
             )
 
+        rows = conn.exec_driver_sql("PRAGMA table_info(suggestions)").fetchall()
+        cols = {r[1] for r in rows}
+        if "email_date" not in cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE suggestions ADD COLUMN email_date DATETIME"
+            )
+
 
 def _run_data_backfills() -> None:
     """Idempotent row updates that run once after schema migrations."""

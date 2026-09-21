@@ -24,16 +24,18 @@ export const STATUS_LABELS: Record<ApplicationStatus, string> = {
   accepted: "Accepted",
 };
 
+/* Desaturated to sit on the warm ink background without the neon-dashboard
+   look, while keeping each stage distinguishable at a glance. */
 export const STATUS_COLORS: Record<ApplicationStatus, string> = {
-  saved:              "#52525b",   /* zinc-600   — neutral, not started */
-  applied:            "#0ea5e9",   /* sky-500    — submitted */
-  online_assessment:  "#8b5cf6",   /* violet-500 — take-home / coding test */
-  phone_screen:       "#14b8a6",   /* teal-500   — live recruiter call */
-  interview:          "#f59e0b",   /* amber-500  — active process */
-  offer:              "#22c55e",   /* green-500  — positive outcome */
-  rejected:           "#f43f5e",   /* rose-500   — closed negative */
-  ghosted:            "#3f3f46",   /* zinc-700   — silent */
-  accepted:           "#16a34a",   /* green-600  — accepted offer */
+  saved:              "#6b645c",   /* warm grey  — neutral, not started */
+  applied:            "#5b8cab",   /* dusty blue — submitted */
+  online_assessment:  "#8878b4",   /* muted iris — take-home / coding test */
+  phone_screen:       "#4f9a8f",   /* soft teal  — live recruiter call */
+  interview:          "#d2954a",   /* ochre      — active process */
+  offer:              "#7aa35f",   /* moss       — positive outcome */
+  rejected:           "#b8564f",   /* brick      — closed negative */
+  ghosted:            "#46423c",   /* dark warm  — silent */
+  accepted:           "#5f9150",   /* deep moss  — accepted offer */
 };
 
 /** Columns hidden on the dashboard unless changed in Settings. */

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { ApplicationStatus, EmailAccount, LLMProvider } from "../api/types";
@@ -336,6 +336,75 @@ function NotificationToggle() {
     >
       Enable
     </button>
+  );
+}
+
+function BackupCard() {
+  const queryClient = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const restore = useMutation({
+    mutationFn: (file: File) => api.restoreBackup(file),
+    onSuccess: (r) => {
+      setError(null);
+      setMessage(r.message);
+      queryClient.invalidateQueries();
+    },
+    onError: (e: Error) => {
+      setMessage(null);
+      setError(e.message);
+    },
+  });
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div className="flex-between" style={{ marginBottom: 14 }}>
+        <div>
+          <strong>Backup</strong>
+          <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
+            One zip with your database and its encryption key. Without the key,
+            saved API keys and mailbox passwords cannot be decrypted again.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <a className="btn-primary" href={api.backupUrl()}>
+            Download backup
+          </a>
+          <button
+            className="btn-secondary"
+            disabled={restore.isPending}
+            onClick={() => fileRef.current?.click()}
+          >
+            {restore.isPending ? "Restoring..." : "Restore..."}
+          </button>
+        </div>
+      </div>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".zip"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (!file) return;
+          if (
+            !confirm(
+              "Restoring replaces everything currently in AppTracker with the " +
+                "contents of this backup. Continue?"
+            )
+          )
+            return;
+          restore.mutate(file);
+        }}
+      />
+
+      {message && <div className="alert alert-success">{message}</div>}
+      {error && <div className="alert alert-error">{error}</div>}
+    </div>
   );
 }
 
@@ -763,6 +832,8 @@ export default function Settings() {
           </select>
         </div>
       </div>
+
+      <BackupCard />
 
       {showProviderModal && (
         <ProviderModal onClose={() => setShowProviderModal(false)} />

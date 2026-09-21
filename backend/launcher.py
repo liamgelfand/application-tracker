@@ -35,8 +35,27 @@ HERE = Path(__file__).parent          # backend/
 ROOT = HERE.parent                    # project root
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 FRONTEND_DIR = ROOT / "frontend"
-LOG_DIR = HERE / "data"
+
+# Make the backend package importable before anything below needs app.config.
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+
+def _data_dir() -> Path:
+    """Per-user data directory, falling back to the repo if config won't load."""
+    try:
+        from app.config import settings as app_settings
+
+        return app_settings.data_path
+    except Exception:  # noqa: BLE001 - logging must work even if config fails
+        fallback = HERE / "data"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
+LOG_DIR = _data_dir()
 LOG_FILE = LOG_DIR / "launcher.log"
+FIRST_RUN_MARKER = LOG_DIR / ".welcomed"
 
 # Windows Startup entries
 _WIN_STARTUP = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup"
@@ -83,6 +102,10 @@ def _configure_logging() -> None:
 
 def _build_frontend() -> None:
     """Run `npm run build` inside frontend/ if dist is absent."""
+    # A packaged build ships the UI inside the bundle and has no npm or source
+    # tree to build from; app.main serves it out of sys._MEIPASS.
+    if getattr(sys, "frozen", False):
+        return
     if FRONTEND_DIST.is_dir():
         return
     logger.info("frontend/dist not found — building now (this takes ~10s)…")
@@ -98,16 +121,53 @@ def _build_frontend() -> None:
     logger.info("Frontend built successfully.")
 
 
+def _icon_path() -> Path | None:
+    """Bundled icon, whether running from source or a PyInstaller build."""
+    candidates = [HERE / "assets" / "icon.ico"]
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        candidates.insert(0, Path(sys._MEIPASS) / "assets" / "icon.ico")
+    return next((p for p in candidates if p.exists()), None)
+
+
 def _make_tray_icon() -> "Image.Image":
-    """Draw a simple 64×64 icon in the brand indigo colour."""
+    """The shared app mark, or a plain fallback if the asset is missing."""
     from PIL import Image, ImageDraw  # noqa: PLC0415
+
+    path = _icon_path()
+    if path is not None:
+        try:
+            return Image.open(path).convert("RGBA")
+        except Exception:  # noqa: BLE001 - the tray must still appear
+            logger.warning("Could not load %s; using fallback icon.", path)
+
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    draw.ellipse([4, 4, 60, 60], fill=(99, 102, 241, 255))
-    # Briefcase-ish shape
-    draw.rectangle([18, 28, 46, 46], fill="white")
-    draw.rectangle([24, 24, 40, 30], outline="white", width=2)
+    draw.rounded_rectangle([2, 2, 62, 62], radius=14, fill=(26, 25, 23, 255))
+    for left, top, color in ((14, 37, (233, 229, 222, 255)),
+                             (29, 26, (233, 229, 222, 255)),
+                             (44, 14, (200, 115, 74, 255))):
+        draw.rounded_rectangle([left, top, left + 8, 50], radius=3, fill=color)
     return img
+
+
+def _health_ok(url: str, timeout_s: float = 2.0) -> bool:
+    """True when something on this port answers as AppTracker."""
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{url}/api/health", timeout=timeout_s) as resp:
+            return json.loads(resp.read().decode("utf-8")).get("status") == "ok"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _port_is_taken(port: int) -> bool:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1.0)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
 def _wait_for_health(url: str, timeout_s: float = 15.0) -> bool:
@@ -253,12 +313,9 @@ class _ServerThread(threading.Thread):
             # Always run with a known working directory (Startup may start elsewhere).
             os.chdir(HERE)
 
-            # Pin DATA_DIR to an absolute path so the database location is
-            # always the same regardless of how/where the launcher is invoked.
-            # Without this, './data' resolves to backend/data/ when launched
-            # from the Startup folder but to project_root/data/ via 'make app'.
-            if not os.environ.get("DATA_DIR"):
-                os.environ["DATA_DIR"] = str(ROOT / "data")
+            # DATA_DIR is intentionally left alone: app.config resolves it to a
+            # per-user directory (%LOCALAPPDATA%\AppTracker) and migrates an
+            # older repo-local database on first run.
 
             # pythonw has sys.stdout=None; uvicorn's default ColorFormatter
             # crashes on stdout.isatty() unless use_colors is forced off.
@@ -296,6 +353,20 @@ def main() -> None:
     port = args.port
     url = f"http://127.0.0.1:{port}"
 
+    # Starting twice used to die on "address already in use" and leave a tray
+    # icon that reported a server it didn't own. Hand off to the live one.
+    if _port_is_taken(port):
+        if _health_ok(url):
+            logger.info("AppTracker is already running at %s — opening it.", url)
+            webbrowser.open(url)
+        else:
+            logger.error(
+                "Port %s is in use by another program. Start AppTracker on a "
+                "different port with --port, e.g. --port 8010.",
+                port,
+            )
+        return
+
     _migrate_windows_startup_if_needed(port)
     _build_frontend()
 
@@ -311,6 +382,14 @@ def main() -> None:
         )
         if server.error:
             logger.error("Server thread error:\n%s", server.error)
+    elif not FIRST_RUN_MARKER.exists():
+        # Subsequent launches stay silent in the tray; the first one needs to
+        # show the user something happened.
+        try:
+            FIRST_RUN_MARKER.write_text("opened\n", encoding="utf-8")
+        except OSError:
+            pass
+        webbrowser.open(url)
 
     if not _TRAY_AVAILABLE or args.no_tray:
         if healthy:

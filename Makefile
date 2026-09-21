@@ -54,6 +54,7 @@ app: build ## Build frontend then launch the tray app (normal end-user usage)
 
 dist: build ## Package a standalone Windows exe via PyInstaller
 	$(VENV_BIN)/python -m pip install pyinstaller
+	$(VENV_BIN)/python backend/scripts/make_icon.py
 	$(VENV_BIN)/pyinstaller --noconfirm backend/apptracker.spec
 
 docker-up: ## Start the full stack with Docker

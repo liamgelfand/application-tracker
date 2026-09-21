@@ -94,6 +94,14 @@ class MergeApplicationsIn(BaseModel):
     target_id: int
 
 
+class DuplicateGroupOut(BaseModel):
+    """Rows that look like one posting split across several applications."""
+
+    company: str
+    reason: str
+    applications: list[ApplicationOut]
+
+
 # ---------- Parsing ----------
 class ParseRequest(BaseModel):
     text: str = Field(..., min_length=1)
@@ -215,6 +223,7 @@ class SuggestionOut(BaseModel):
     email_subject: str | None = None
     email_sender: str | None = None
     email_snippet: str | None = None
+    email_date: datetime | None = None
     created_at: datetime
 
 

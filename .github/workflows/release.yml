@@ -1,0 +1,86 @@
+name: Release
+
+# Tag a version to publish a downloadable build:
+#   git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller==6.11.1
+
+      - name: Generate application icon
+        working-directory: backend
+        run: python scripts/make_icon.py
+
+      - name: Build AppTracker.exe
+        run: pyinstaller --noconfirm backend/apptracker.spec
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist/AppTracker.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  AppTracker.exe" | Out-File -FilePath dist/AppTracker.exe.sha256 -Encoding ascii
+          Write-Host "SHA256: $hash"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppTracker-windows
+          path: |
+            dist/AppTracker.exe
+            dist/AppTracker.exe.sha256
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/AppTracker.exe
+            dist/AppTracker.exe.sha256
+          body: |
+            ## Install (Windows)
+
+            1. Download `AppTracker.exe` below.
+            2. Run it. Windows SmartScreen will warn because the build is not
+               code-signed — choose **More info -> Run anyway**.
+            3. The app opens once, then lives in the system tray. Right-click the
+               tray icon for **Open**, **Health Check**, **Start on Login**, or **Quit**.
+
+            Your data is stored in `%LOCALAPPDATA%\AppTracker`. Back it up from
+            **Settings -> Backup** before reinstalling: the `secret.key` in that
+            folder is the only way to decrypt saved API keys and mailbox passwords.

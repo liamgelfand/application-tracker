@@ -25,12 +25,14 @@ from ..schemas import (
     ApplicationDetailOut,
     ApplicationOut,
     ApplicationUpdate,
+    DuplicateGroupOut,
     EmailActivityOut,
     MergeApplicationsIn,
     MessageOut,
     StatusEventOut,
 )
 from ..services.settings_service import get_follow_up_days
+from ..services.suggestion_service import is_placeholder_title, normalize_label
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 
@@ -294,6 +296,63 @@ def list_follow_up_reminders(db: Session = Depends(get_db)) -> list[Application]
     return due
 
 
+def _title_overlap(a: str, b: str) -> float:
+    """Jaccard overlap of title words, after stripping boilerplate."""
+    ta = {w for w in normalize_label(a).split() if len(w) > 1}
+    tb = {w for w in normalize_label(b).split() if len(w) > 1}
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+@router.get("/duplicates", response_model=list[DuplicateGroupOut])
+def list_duplicate_candidates(db: Session = Depends(get_db)) -> list[DuplicateGroupOut]:
+    """Applications that look like one posting recorded twice.
+
+    Deliberately conservative: several genuinely different reqs at the same
+    employer are normal, so rows whose job ids disagree are never paired, and
+    titles must overlap heavily to be suggested.
+    """
+    apps = list(db.execute(select(Application)).scalars().all())
+    by_company: dict[str, list[Application]] = {}
+    for app in apps:
+        key = normalize_label(app.company)
+        if key:
+            by_company.setdefault(key, []).append(app)
+
+    groups: list[DuplicateGroupOut] = []
+    for company_apps in by_company.values():
+        if len(company_apps) < 2:
+            continue
+        for i, first in enumerate(company_apps):
+            for second in company_apps[i + 1 :]:
+                jid_a = (first.job_id or "").strip()
+                jid_b = (second.job_id or "").strip()
+                if jid_a and jid_b and jid_a != jid_b:
+                    continue  # different requisitions at the same employer
+                if jid_a and jid_b and jid_a == jid_b:
+                    reason = f"Same job id {jid_a}"
+                elif is_placeholder_title(first.title) or is_placeholder_title(
+                    second.title
+                ):
+                    reason = "One row has no role title yet"
+                elif _title_overlap(first.title, second.title) >= 0.7:
+                    reason = "Nearly identical role titles"
+                else:
+                    continue
+                groups.append(
+                    DuplicateGroupOut(
+                        company=first.company,
+                        reason=reason,
+                        applications=[
+                            ApplicationOut.model_validate(first),
+                            ApplicationOut.model_validate(second),
+                        ],
+                    )
+                )
+    return groups
+
+
 @router.post("/merge", response_model=ApplicationDetailOut)
 def merge_applications(
     payload: MergeApplicationsIn, db: Session = Depends(get_db)
@@ -314,6 +373,12 @@ def merge_applications(
     # Prefer non-placeholder title/company and fill empty optional fields.
     if (not target.title or target.title.lower() == "unknown") and source.title:
         target.title = source.title
+    if source.job_id and not target.job_id:
+        target.job_id = source.job_id
+    # "Ghosted" records an absence of news, so any real outcome on the other
+    # row outranks it regardless of which way round the merge was done.
+    if target.status == ApplicationStatus.ghosted and source.status != ApplicationStatus.ghosted:
+        target.status = source.status
     if source.location and not target.location:
         target.location = source.location
     if source.url and not target.url:

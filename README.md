@@ -113,7 +113,7 @@ Backend settings are read from environment variables or a `backend/.env` file (s
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DATA_DIR` | `./data` | Where the SQLite DB and encryption key live. |
+| `DATA_DIR` | per-user app data dir | Where the SQLite DB and encryption key live. Unset it and the app uses `%LOCALAPPDATA%\AppTracker` on Windows, `~/Library/Application Support/AppTracker` on macOS, or `~/.local/share/AppTracker` on Linux. An existing `data/tracker.db` in the repo is copied there once on first start. |
 | `FRONTEND_ORIGIN` | `http://localhost:5173` | Allowed CORS origin. |
 | `EMAIL_POLL_INTERVAL_SECONDS` | `900` | Default inbox poll interval (changeable in Settings). |
 | `APP_SECRET_KEY` | auto-generated | Override the encryption key (base64 urlsafe, 32 bytes). |
@@ -121,8 +121,10 @@ Backend settings are read from environment variables or a `backend/.env` file (s
 ## Security notes
 
 - This is a **single-user, local-first** app with no authentication by default. Don't expose it directly to the public internet without adding auth and TLS.
-- API keys and email passwords are encrypted at rest using a key stored in `DATA_DIR/secret.key`. Keep that file (and your `data/` directory) private and backed up. If you lose the key, stored secrets can't be decrypted.
+- API keys and email passwords are encrypted at rest using a key stored in `DATA_DIR/secret.key`. Keep it private and backed up — if you lose the key, stored secrets can't be decrypted.
+- Use **Settings → Backup → Download backup** for a single zip containing both the database and that key, and **Restore…** to load one back. Restoring keeps the replaced dataset in a `pre-restore-<timestamp>` folder beside the database.
 - Your email/API credentials never leave your machine except to talk to the providers you configure.
+- Storing data outside the repo also keeps SQLite away from cloud-sync clients, which corrupt WAL files.
 
 ## Testing
 
@@ -143,15 +145,30 @@ Both suites also run automatically in CI on every push and pull request.
 
 Interactive API docs are available at http://localhost:8000/docs when the backend is running.
 
-## Packaging a Windows `.exe` (optional)
+## Download a prebuilt Windows app
 
-For a single-file tray app without needing Python on the target machine:
+Grab `AppTracker.exe` from the [latest release](../../releases/latest). It needs no
+Python install. SmartScreen will warn that the publisher is unknown because the
+build isn't code-signed — choose **More info → Run anyway**.
+
+The app opens your browser once, then lives in the system tray. Right-click the
+tray icon for **Open**, **Health Check**, **Start on Login**, and **Quit**.
+
+Pushing a `v*` tag builds and drafts a release via
+[`.github/workflows/release.yml`](.github/workflows/release.yml):
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+### Building the `.exe` yourself
 
 ```bash
 make setup
-make build
+make build                      # frontend/dist must exist first
 pip install pyinstaller
-make dist    # writes dist/AppTracker.exe
+python backend/scripts/make_icon.py   # generates backend/assets/icon.ico
+make dist                       # writes dist/AppTracker.exe
 ```
 
 Or manually:
@@ -159,10 +176,13 @@ Or manually:
 ```powershell
 cd frontend; npm run build; cd ..
 backend\.venv\Scripts\pip install pyinstaller
+backend\.venv\Scripts\python backend\scripts\make_icon.py
 backend\.venv\Scripts\pyinstaller --noconfirm backend\apptracker.spec
 ```
 
-The first run may still need Visual C++ redistributables. Prefer keeping the project off OneDrive/cloud-synced folders — `node_modules` and `.venv` thrash sync clients.
+The first run may still need Visual C++ redistributables. Keep the *source
+checkout* off OneDrive and other synced folders — `node_modules` and `.venv`
+thrash sync clients.
 
 ## Roadmap / ideas
 

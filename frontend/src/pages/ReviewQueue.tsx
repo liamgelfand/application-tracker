@@ -21,6 +21,18 @@ type Draft = {
   suggested_status: ApplicationStatus | "";
 };
 
+function emailDateLabel(s: Suggestion): string | null {
+  const raw = s.email_date ?? s.created_at;
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+  });
+}
+
 function draftFrom(s: Suggestion): Draft {
   return {
     company: s.company ?? "",
@@ -96,8 +108,9 @@ export default function ReviewQueue() {
         <div>
           <h1 className="page-title">Review Queue</h1>
           <p className="subtitle">
-            Email-detected updates awaiting your approval. Edit company, title,
-            or status before approving.
+            Email-detected updates awaiting your approval, oldest email first so
+            approving in order rebuilds each timeline correctly. Edit company,
+            title, or status before approving.
           </p>
         </div>
         {suggestions.length > 0 && (
@@ -160,11 +173,13 @@ export default function ReviewQueue() {
                     />
                     <span className="badge">{kindLabel(s)}</span>
                   </label>
-                  {s.confidence != null && (
-                    <span className="muted" style={{ fontSize: 12 }}>
-                      {s.confidence}% confident
-                    </span>
-                  )}
+                  <span
+                    className="muted"
+                    style={{ fontSize: 12, display: "flex", gap: 8 }}
+                  >
+                    {emailDateLabel(s) && <span>{emailDateLabel(s)}</span>}
+                    {s.confidence != null && <span>{s.confidence}%</span>}
+                  </span>
                 </div>
 
                 {s.summary && (

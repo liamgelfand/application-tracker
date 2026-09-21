@@ -153,6 +153,7 @@ def sync_account(
                     sender=msg.sender,
                     subject=msg.subject,
                     snippet=msg.body,
+                    email_date=msg.received_at,
                 )
                 if suggestion is not None:
                     db.add(suggestion)

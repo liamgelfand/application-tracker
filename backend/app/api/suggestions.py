@@ -40,8 +40,14 @@ def _to_out(suggestion: Suggestion) -> SuggestionOut:
         email_subject=suggestion.email_subject,
         email_sender=suggestion.email_sender,
         email_snippet=suggestion.email_snippet,
+        email_date=suggestion.email_date,
         created_at=suggestion.created_at,
     )
+
+
+def _chronological(suggestion: Suggestion):
+    """Sort key: when the email was sent, falling back to when we saw it."""
+    return (suggestion.email_date or suggestion.created_at, suggestion.id)
 
 
 @router.get("", response_model=list[SuggestionOut])
@@ -52,22 +58,27 @@ def list_suggestions(
     stmt = select(Suggestion)
     if status is not None:
         stmt = stmt.where(Suggestion.status == status)
-    stmt = stmt.order_by(Suggestion.created_at.desc())
-    return [_to_out(s) for s in db.execute(stmt).scalars().all()]
+    rows = list(db.execute(stmt).scalars().all())
+    # Oldest email first: an application confirmation should be reviewed before
+    # the rejection that answered it, or approving them rebuilds a bad timeline.
+    rows.sort(key=_chronological)
+    return [_to_out(s) for s in rows]
 
 
 @router.post("/bulk-approve", response_model=MessageOut)
 def bulk_approve(
     payload: SuggestionBulkIn, db: Session = Depends(get_db)
 ) -> MessageOut:
-    count = 0
-    for sid in payload.ids:
-        suggestion = db.get(Suggestion, sid)
-        if suggestion is None or suggestion.status != SuggestionStatus.pending:
-            continue
+    pending = [
+        s
+        for s in (db.get(Suggestion, sid) for sid in payload.ids)
+        if s is not None and s.status == SuggestionStatus.pending
+    ]
+    # Apply in email order regardless of the order ids arrived in.
+    pending.sort(key=_chronological)
+    for suggestion in pending:
         apply_suggestion(db, suggestion)
-        count += 1
-    return MessageOut(message=f"Approved {count} suggestion(s)")
+    return MessageOut(message=f"Approved {len(pending)} suggestion(s)")
 
 
 @router.post("/bulk-reject", response_model=MessageOut)

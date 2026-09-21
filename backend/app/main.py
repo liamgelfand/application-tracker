@@ -12,7 +12,15 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .api import analytics, applications, emails, parse, settings, suggestions
+from .api import (
+    analytics,
+    applications,
+    backup,
+    emails,
+    parse,
+    settings,
+    suggestions,
+)
 from .config import settings as app_settings
 from .db import SessionLocal, get_db, init_db
 from .models import EmailAccount
@@ -72,6 +80,7 @@ app.include_router(parse.router)
 app.include_router(emails.router)
 app.include_router(suggestions.router)
 app.include_router(settings.router)
+app.include_router(backup.router)
 
 
 @app.get("/api/health")
@@ -114,6 +123,11 @@ def health(db: Session = Depends(get_db)) -> dict:
 # In dev mode (npm run dev) this is skipped and Vite handles the frontend.
 if STATIC_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
+
+    @app.get("/favicon.svg", include_in_schema=False)
+    async def favicon() -> FileResponse:
+        """Served explicitly: the SPA fallback below would return index.html."""
+        return FileResponse(str(STATIC_DIR / "favicon.svg"), media_type="image/svg+xml")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str) -> FileResponse:

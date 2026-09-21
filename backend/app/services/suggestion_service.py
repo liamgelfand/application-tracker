@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from sqlalchemy import func
+
 from ..models import (
     Application,
     ApplicationStatus,
@@ -18,6 +20,23 @@ from ..models import (
 )
 from .email.prefilter import is_otp_or_verification
 from .status_inference import refine_suggested_status
+
+# Pipeline order. Used to reject backwards moves when an older email is
+# approved after a newer one.
+STAGE_RANK = {
+    ApplicationStatus.saved: 0,
+    ApplicationStatus.applied: 1,
+    ApplicationStatus.online_assessment: 2,
+    ApplicationStatus.phone_screen: 3,
+    ApplicationStatus.interview: 4,
+    ApplicationStatus.offer: 5,
+    ApplicationStatus.accepted: 6,
+}
+CLOSED_STATUSES = {
+    ApplicationStatus.rejected,
+    ApplicationStatus.ghosted,
+    ApplicationStatus.accepted,
+}
 
 # Prefer explicit numeric "12345 - Role" (IBM-style) before looser labels.
 _JOB_ID_PATTERNS = [
@@ -91,6 +110,29 @@ def _same_role(
     return _titles_match(app.title, title)
 
 
+def _as_naive_utc(value: datetime | None) -> datetime | None:
+    """Drop to naive UTC so values read back from SQLite stay comparable."""
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# Exposed so duplicate detection in the API applies the same rules as matching.
+normalize_label = _normalize
+is_placeholder_title = _is_placeholder_title
+
+
+def _conflicting_job_ids(app: Application, job_id: str | None) -> bool:
+    """True when both sides name a req id and they disagree (different postings)."""
+    return bool(job_id and app.job_id and app.job_id.strip() != job_id)
+
+
 def _find_existing_application(
     db: Session,
     company: str | None,
@@ -116,29 +158,108 @@ def _find_existing_application(
     if not company_matches:
         return None
 
-    if job_id:
-        jid = job_id.strip()
+    jid = job_id.strip() if job_id else None
+    has_title = bool(title) and not _is_placeholder_title(title)
+
+    # 1. Same req id is the same posting, whatever the titles look like.
+    if jid:
         for app in company_matches:
             if app.job_id and app.job_id.strip() == jid:
                 return app
-        # Known job_id that doesn't match any row → new role at this company.
-        if title and not _is_placeholder_title(title):
-            for app in company_matches:
-                if _titles_match(app.title, title):
-                    return app
-        return None
 
-    if title and not _is_placeholder_title(title):
+    # 2. Same role title, as long as req ids don't contradict each other.
+    if has_title:
         for app in company_matches:
+            if _conflicting_job_ids(app, jid):
+                continue
             if _titles_match(app.title, title):
                 return app
-        # Distinct role at same company → do not merge.
-        return None
 
-    # No title and no job_id: refuse to guess among multiple company rows.
-    if len(company_matches) == 1 and _is_placeholder_title(company_matches[0].title):
+    # 3. Adopt a stub this pipeline created earlier from a thinner email
+    #    ("Unknown" title) instead of opening a second row for one posting.
+    adoptable = [
+        a
+        for a in company_matches
+        if _is_placeholder_title(a.title) and not _conflicting_job_ids(a, jid)
+    ]
+    if len(adoptable) == 1:
+        return adoptable[0]
+
+    # 4. Nothing to distinguish roles by, and only one application here.
+    if not jid and not has_title and len(company_matches) == 1:
         return company_matches[0]
+
     return None
+
+
+def _latest_event_time(db: Session, app: Application) -> datetime | None:
+    """Timestamp of the newest recorded evidence for this application."""
+    return db.execute(
+        select(func.max(StatusEvent.created_at)).where(
+            StatusEvent.application_id == app.id
+        )
+    ).scalar_one_or_none()
+
+
+def _is_forward_or_closing(
+    prior: ApplicationStatus | None, new: ApplicationStatus
+) -> bool:
+    if new in CLOSED_STATUSES or prior is None:
+        return True
+    if prior in CLOSED_STATUSES:
+        # Newer evidence after a rejection means the process actually reopened.
+        return True
+    return STAGE_RANK.get(new, 0) >= STAGE_RANK.get(prior, 0)
+
+
+def _record_status(
+    db: Session,
+    app: Application,
+    new_status: ApplicationStatus | None,
+    *,
+    note: str | None,
+    source: EventSource,
+    event_time: datetime,
+) -> None:
+    """Add timeline history, and move the current status only on newest evidence.
+
+    Approving an older email after a newer one must not drag the card
+    backwards (an application confirmation arriving after a rejection), but
+    the stage it proves still belongs on the timeline at its own date.
+    """
+    if new_status is None or new_status == app.status:
+        return
+
+    prior = app.status
+    event_time = _as_naive_utc(event_time) or _now_naive()
+    latest = _as_naive_utc(_latest_event_time(db, app))
+    is_newest = latest is None or event_time >= latest
+
+    if is_newest and _is_forward_or_closing(prior, new_status):
+        app.status = new_status
+        db.add(
+            StatusEvent(
+                application_id=app.id,
+                from_status=prior,
+                to_status=new_status,
+                note=note or "Updated from email",
+                source=source,
+                created_at=event_time,
+            )
+        )
+        return
+
+    # Stale or backwards evidence: keep the history, leave the card alone.
+    db.add(
+        StatusEvent(
+            application_id=app.id,
+            from_status=None,
+            to_status=new_status,
+            note=note or "Earlier email (status unchanged)",
+            source=source,
+            created_at=event_time,
+        )
+    )
 
 
 def _company_from_sender(sender: str | None) -> str | None:
@@ -190,12 +311,16 @@ def _enrich_application(
     company: str | None,
     title: str | None,
     job_id: str | None = None,
-) -> None:
-    """Fill missing/placeholder fields on an existing application."""
+) -> bool:
+    """Fill missing/placeholder fields. Returns True when something changed."""
+    changed = False
     if title and not _is_placeholder_title(title) and _is_placeholder_title(app.title):
         app.title = title
+        changed = True
     if job_id and not app.job_id:
         app.job_id = job_id.strip()
+        changed = True
+    return changed
 
 
 def _create_or_merge(
@@ -207,6 +332,7 @@ def _create_or_merge(
     summary: str | None,
     source: EventSource,
     job_id: str | None = None,
+    event_time: datetime | None = None,
 ) -> Application | None:
     """Merge into a matching role or create a new application."""
     company = (company or "").strip() or None
@@ -214,6 +340,7 @@ def _create_or_merge(
     job_id = (job_id or "").strip() or None
     if _is_placeholder_title(title):
         title = None
+    event_time = _as_naive_utc(event_time) or _now_naive()
 
     if not company:
         return None
@@ -221,28 +348,21 @@ def _create_or_merge(
     existing = _find_existing_application(db, company, title, job_id)
     if existing is not None:
         _enrich_application(existing, company=company, title=title, job_id=job_id)
-        if status and status != existing.status:
-            old = existing.status
-            existing.status = status
-            db.add(
-                StatusEvent(
-                    application_id=existing.id,
-                    from_status=old,
-                    to_status=existing.status,
-                    note=summary or "Updated from email",
-                    source=source,
-                )
-            )
-        elif title or job_id:
-            db.add(
-                StatusEvent(
-                    application_id=existing.id,
-                    from_status=existing.status,
-                    to_status=existing.status,
-                    note=summary or "Enriched from email",
-                    source=source,
-                )
-            )
+        _record_status(
+            db,
+            existing,
+            status,
+            note=summary,
+            source=source,
+            event_time=event_time,
+        )
+        # An email that predates the row is evidence of when this actually began.
+        created = _as_naive_utc(existing.created_at)
+        applied = _as_naive_utc(existing.date_applied)
+        if created and event_time < created:
+            existing.created_at = event_time
+            if applied is None or event_time < applied:
+                existing.date_applied = event_time
         return existing
 
     app = Application(
@@ -251,7 +371,8 @@ def _create_or_merge(
         job_id=job_id,
         status=status or ApplicationStatus.applied,
         source="email",
-        date_applied=datetime.now(timezone.utc),
+        created_at=event_time,
+        date_applied=event_time,
     )
     db.add(app)
     db.flush()
@@ -262,6 +383,7 @@ def _create_or_merge(
             to_status=app.status,
             note=summary or "Created from email",
             source=source,
+            created_at=event_time,
         )
     )
     return app
@@ -273,6 +395,7 @@ def build_suggestion_from_analysis(
     sender: str,
     subject: str,
     snippet: str,
+    email_date: datetime | None = None,
 ) -> Suggestion | None:
     """Turn an analyzer result into a pending Suggestion (or None if not relevant)."""
     if not analysis.get("is_job_related"):
@@ -354,6 +477,7 @@ def build_suggestion_from_analysis(
         email_subject=subject,
         email_sender=sender,
         email_snippet=snippet[:500],
+        email_date=email_date,
     )
 
 
@@ -405,6 +529,14 @@ def apply_suggestion(
         suggestion.email_subject, suggestion.email_snippet
     )
 
+    # Order the timeline by when the email was sent, not when the sync ran or
+    # when you happened to click Approve.
+    event_time = (
+        _as_naive_utc(suggestion.email_date)
+        or _as_naive_utc(suggestion.created_at)
+        or _now_naive()
+    )
+
     app: Application | None = None
 
     if suggestion.kind == SuggestionKind.new_application:
@@ -416,6 +548,7 @@ def apply_suggestion(
             status=suggestion.suggested_status,
             summary=suggestion.summary,
             source=source,
+            event_time=event_time,
         )
     elif suggestion.application_id:
         app = db.get(Application, suggestion.application_id)
@@ -434,6 +567,7 @@ def apply_suggestion(
                         status=suggestion.suggested_status or ApplicationStatus.applied,
                         summary=suggestion.summary,
                         source=source,
+                        event_time=event_time,
                     )
                     suggestion.status = SuggestionStatus.approved
                     db.commit()
@@ -445,32 +579,18 @@ def apply_suggestion(
                 if better is not None:
                     app = better
                     _enrich_application(app, company=company, title=title, job_id=job_id)
-            if (
-                suggestion.kind == SuggestionKind.status_change
-                and suggestion.suggested_status
-                and suggestion.suggested_status != app.status
-            ):
-                old = app.status
-                app.status = suggestion.suggested_status
-                db.add(
-                    StatusEvent(
-                        application_id=app.id,
-                        from_status=old,
-                        to_status=app.status,
-                        note=suggestion.summary or "Updated from email",
-                        source=source,
-                    )
-                )
-            else:
-                db.add(
-                    StatusEvent(
-                        application_id=app.id,
-                        from_status=app.status,
-                        to_status=app.status,
-                        note=suggestion.summary or "Email note",
-                        source=source,
-                    )
-                )
+            # Only status changes earn a timeline entry; the email itself is
+            # already listed under the application's email activity.
+            _record_status(
+                db,
+                app,
+                suggestion.suggested_status
+                if suggestion.kind == SuggestionKind.status_change
+                else None,
+                note=suggestion.summary,
+                source=source,
+                event_time=event_time,
+            )
         else:
             app = _create_or_merge(
                 db,
@@ -480,6 +600,7 @@ def apply_suggestion(
                 status=suggestion.suggested_status,
                 summary=suggestion.summary,
                 source=source,
+                event_time=event_time,
             )
     else:
         app = _create_or_merge(
@@ -490,6 +611,7 @@ def apply_suggestion(
             status=suggestion.suggested_status or ApplicationStatus.applied,
             summary=suggestion.summary,
             source=source,
+            event_time=event_time,
         )
 
     suggestion.status = SuggestionStatus.approved

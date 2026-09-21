@@ -28,6 +28,12 @@ export interface Application {
   updated_at: string;
 }
 
+export interface DuplicateGroup {
+  company: string;
+  reason: string;
+  applications: Application[];
+}
+
 export interface StatusEvent {
   id: number;
   from_status: ApplicationStatus | null;
@@ -105,6 +111,7 @@ export interface Suggestion {
   email_subject: string | null;
   email_sender: string | null;
   email_snippet: string | null;
+  email_date: string | null;
   created_at: string;
 }
 
@@ -148,14 +155,60 @@ export interface HealthStatus {
   sync: SyncProgress;
 }
 
+export interface AnalyticsFunnelStep {
+  stage: string;
+  label: string;
+  count: number;
+  rate: number;
+  conversion: number | null;
+}
+
+export interface AnalyticsStageCount {
+  stage: ApplicationStatus;
+  count: number;
+}
+
+export interface AnalyticsGroupRow {
+  submitted: number;
+  response_rate: number;
+  oa_rate: number;
+  interview_rate: number;
+  offer_rate: number;
+  assessments: number;
+  interviews: number;
+  offers: number;
+}
+
+export interface AnalyticsSourceRow extends AnalyticsGroupRow {
+  source: string;
+}
+
+export interface AnalyticsCompanyRow extends AnalyticsGroupRow {
+  company: string;
+}
+
 export interface Analytics {
   total: number;
   submitted: number;
   active: number;
   status_counts: Record<ApplicationStatus, number>;
+  response_count: number;
+  oa_count: number;
+  interview_count: number;
+  offer_count: number;
+  ghost_count: number;
   response_rate: number;
+  oa_rate: number;
   interview_rate: number;
   offer_rate: number;
+  ghost_rate: number;
   avg_days_to_response: number | null;
+  avg_days_to_oa: number | null;
+  avg_days_to_interview: number | null;
+  avg_days_to_offer: number | null;
+  funnel: AnalyticsFunnelStep[];
+  rejection_by_stage: AnalyticsStageCount[];
+  by_source: AnalyticsSourceRow[];
+  by_company: AnalyticsCompanyRow[];
   over_time: { week: string; count: number }[];
 }

@@ -8,20 +8,36 @@ import StatusBadge from "../components/StatusBadge";
 
 type View = "board" | "table";
 
+function daysSince(iso: string | null): number | null {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return null;
+  return Math.max(0, Math.floor((Date.now() - then) / 86_400_000));
+}
+
+function ageLabel(days: number): string {
+  if (days === 0) return "today";
+  if (days === 1) return "1d";
+  return `${days}d`;
+}
+
 function AppCard({
   app,
   onDragStart,
   mergeMode,
   selected,
   onSelect,
+  stale,
 }: {
   app: Application;
   onDragStart: (id: number) => void;
   mergeMode: boolean;
   selected: boolean;
   onSelect: (id: number) => void;
+  stale: boolean;
 }) {
   const navigate = useNavigate();
+  const age = daysSince(app.updated_at);
   return (
     <div
       className={`app-card ${selected ? "app-card-selected" : ""}`}
@@ -49,6 +65,105 @@ function AppCard({
           {[app.location, app.salary].filter(Boolean).join(" · ")}
         </div>
       )}
+      {(age !== null || stale) && (
+        <div className="app-card-foot">
+          {stale ? (
+            <span className="app-card-stale">Follow up</span>
+          ) : (
+            app.job_id && <span>#{app.job_id}</span>
+          )}
+          {age !== null && (
+            <span className="app-card-age" title="Since last update">
+              {ageLabel(age)}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Pick the row that should survive a merge: the one carrying more identity. */
+function mergeTarget(pair: Application[]): [Application, Application] {
+  const score = (a: Application) =>
+    (a.job_id ? 2 : 0) +
+    (a.title && a.title.toLowerCase() !== "unknown" ? 1 : 0) +
+    (a.status !== "ghosted" ? 1 : 0);
+  const [first, second] = pair;
+  return score(second) > score(first) ? [second, first] : [first, second];
+}
+
+function DuplicateBanner() {
+  const queryClient = useQueryClient();
+  const [dismissed, setDismissed] = useState(false);
+
+  const { data: groups = [] } = useQuery({
+    queryKey: ["duplicates"],
+    queryFn: () => api.listDuplicates(),
+  });
+
+  const merge = useMutation({
+    mutationFn: ({ source, target }: { source: number; target: number }) =>
+      api.mergeApplications(source, target),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["applications"] });
+      queryClient.invalidateQueries({ queryKey: ["duplicates"] });
+    },
+  });
+
+  if (dismissed || groups.length === 0) return null;
+
+  return (
+    <div className="alert alert-info" style={{ marginBottom: 14 }}>
+      <div className="flex-between">
+        <strong>
+          {groups.length} possible duplicate
+          {groups.length === 1 ? "" : "s"}
+        </strong>
+        <button
+          className="btn-secondary"
+          style={{ padding: "2px 8px", fontSize: 12 }}
+          onClick={() => setDismissed(true)}
+        >
+          Hide
+        </button>
+      </div>
+      <div className="stack" style={{ marginTop: 10, gap: 8 }}>
+        {groups.map((g) => {
+          const [target, source] = mergeTarget(g.applications);
+          return (
+            <div
+              key={`${target.id}-${source.id}`}
+              className="flex-between"
+              style={{ gap: 12, alignItems: "flex-start" }}
+            >
+              <div style={{ fontSize: 13 }}>
+                <div>
+                  <strong>{g.company}</strong>
+                  <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+                    {g.reason}
+                  </span>
+                </div>
+                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                  <Link to={`/applications/${target.id}`}>{target.title}</Link>
+                  {" + "}
+                  <Link to={`/applications/${source.id}`}>{source.title}</Link>
+                </div>
+              </div>
+              <button
+                className="btn-secondary"
+                disabled={merge.isPending}
+                style={{ whiteSpace: "nowrap" }}
+                onClick={() =>
+                  merge.mutate({ source: source.id, target: target.id })
+                }
+              >
+                Merge
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -78,6 +193,8 @@ export default function Dashboard() {
     queryKey: ["settings"],
     queryFn: () => api.getSettings(),
   });
+
+  const staleIds = new Set(reminders.map((r) => r.id));
 
   const hiddenStatuses = settings?.hidden_board_statuses ?? DEFAULT_HIDDEN_BOARD_STATUSES;
 
@@ -239,6 +356,8 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <DuplicateBanner />
+
       {reminders.length > 0 && (
         <div className="alert alert-info" style={{ marginBottom: 14 }}>
           <strong>
@@ -345,6 +464,7 @@ export default function Dashboard() {
                       selected={mergePick.includes(app.id)}
                       onSelect={onMergeSelect}
                       onDragStart={(id) => (draggedId.current = id)}
+                      stale={staleIds.has(app.id)}
                     />
                   ))}
                 </div>

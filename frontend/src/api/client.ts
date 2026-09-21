@@ -4,6 +4,7 @@ import type {
   Application,
   ApplicationDetail,
   ApplicationStatus,
+  DuplicateGroup,
   EmailAccount,
   HealthStatus,
   LLMProvider,
@@ -90,6 +91,8 @@ export const api = {
     }
     return res.json() as Promise<{ message: string }>;
   },
+
+  listDuplicates: () => request<DuplicateGroup[]>("/applications/duplicates"),
 
   // Analytics
   getAnalytics: () => request<Analytics>("/analytics"),
@@ -200,4 +203,25 @@ export const api = {
     ),
   getSyncProgress: () =>
     request<SyncProgress>("/email-accounts/sync-progress"),
+
+  // Backup
+  backupUrl: () => `${BASE}/backup`,
+  restoreBackup: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/backup/restore`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        detail = (await res.json()).detail || detail;
+      } catch {
+        // ignore
+      }
+      throw new Error(detail);
+    }
+    return res.json() as Promise<{ message: string }>;
+  },
 };

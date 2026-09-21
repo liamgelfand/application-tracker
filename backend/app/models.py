@@ -80,7 +80,7 @@ class Application(Base):
     events: Mapped[list["StatusEvent"]] = relationship(
         back_populates="application",
         cascade="all, delete-orphan",
-        order_by="StatusEvent.created_at.desc()",
+        order_by="StatusEvent.created_at.desc(), StatusEvent.id.desc()",
     )
     suggestions: Mapped[list["Suggestion"]] = relationship(
         back_populates="application", cascade="all, delete-orphan"
@@ -160,6 +160,9 @@ class Suggestion(Base):
     email_subject: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_sender: Mapped[str | None] = mapped_column(String(512), nullable=True)
     email_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # When the email was actually sent. Timelines and ordering use this rather
+    # than created_at, which is only when the sync happened to run.
+    email_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     application: Mapped["Application | None"] = relationship(back_populates="suggestions")

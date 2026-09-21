@@ -36,6 +36,17 @@ function SyncToast() {
   );
 }
 
+function BrandMark() {
+  return (
+    <svg className="brand-icon" viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="14" fill="#1a1917" />
+      <rect x="14" y="37" width="8" height="13" rx="3" fill="#e9e5de" />
+      <rect x="29" y="26" width="8" height="24" rx="3" fill="#e9e5de" />
+      <rect x="44" y="14" width="8" height="36" rx="3" fill="#c8734a" />
+    </svg>
+  );
+}
+
 function Sidebar() {
   const { data: suggestions } = useQuery({
     queryKey: ["suggestions", "pending"],
@@ -71,7 +82,7 @@ function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-icon">AT</div>
+        <BrandMark />
         AppTracker
       </div>
 
@@ -97,15 +108,6 @@ function Sidebar() {
       </NavLink>
 
       <div className="spacer" />
-      <a
-        href="https://github.com"
-        target="_blank"
-        rel="noreferrer"
-        className="nav-link"
-        style={{ fontSize: 12 }}
-      >
-        GitHub
-      </a>
     </aside>
   );
 }
