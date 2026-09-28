@@ -12,6 +12,7 @@ import type {
   Suggestion,
   SuggestionApprovePayload,
   SyncProgress,
+  UpdateStatus,
 } from "./types";
 
 const BASE = "/api";
@@ -224,4 +225,16 @@ export const api = {
     }
     return res.json() as Promise<{ message: string }>;
   },
+
+  // Updates
+  getUpdateStatus: () => request<UpdateStatus>("/updates"),
+  checkForUpdate: () =>
+    request<UpdateStatus>("/updates/check", { method: "POST" }),
+  downloadUpdate: () =>
+    request<UpdateStatus>("/updates/download", { method: "POST" }),
+  installUpdate: () =>
+    request<{ ok: boolean; version: string; message: string }>(
+      "/updates/install",
+      { method: "POST" }
+    ),
 };

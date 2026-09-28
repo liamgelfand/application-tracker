@@ -141,8 +141,26 @@ export interface SyncProgress {
   idle_seconds: number;
 }
 
+export interface UpdateStatus {
+  current_version: string;
+  latest_version: string | null;
+  update_available: boolean;
+  release_url: string;
+  notes: string;
+  published_at: string | null;
+  supported: boolean;
+  reason: string | null;
+  staged_version: string | null;
+  phase: "idle" | "checking" | "downloading" | "verifying" | "ready" | "error";
+  message: string;
+  percent: number;
+  busy: boolean;
+  error: string | null;
+}
+
 export interface HealthStatus {
   status: string;
+  version?: string;
   llm: {
     configured: boolean;
     name: string | null;

@@ -72,6 +72,8 @@ a = Analysis(
         "app.api.parse",
         "app.api.settings",
         "app.api.suggestions",
+        "app.api.updates",
+        "app.services.updater",
         *tiktoken_imports,
     ],
     hookspath=[],

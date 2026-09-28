@@ -20,6 +20,7 @@ from .api import (
     parse,
     settings,
     suggestions,
+    updates,
 )
 from .config import settings as app_settings
 from .db import SessionLocal, get_db, init_db
@@ -29,6 +30,7 @@ from .scheduler import start as start_scheduler
 from .services import sync_progress
 from .services.llm.service import get_active_provider
 from .services.settings_service import get_poll_interval
+from .version import __version__
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tracker")
@@ -58,7 +60,7 @@ async def lifespan(app: FastAPI):
         shutdown_scheduler()
 
 
-app = FastAPI(title="Job Application Tracker", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Job Application Tracker", version=__version__, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -81,6 +83,7 @@ app.include_router(emails.router)
 app.include_router(suggestions.router)
 app.include_router(settings.router)
 app.include_router(backup.router)
+app.include_router(updates.router)
 
 
 @app.get("/api/health")
@@ -113,6 +116,7 @@ def health(db: Session = Depends(get_db)) -> dict:
 
     return {
         "status": "ok",
+        "version": __version__,
         "llm": llm,
         "email": email,
         "sync": sync_progress.get(),

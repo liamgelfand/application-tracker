@@ -78,7 +78,12 @@ jobs:
             2. Run it. Windows SmartScreen will warn because the build is not
                code-signed — choose **More info -> Run anyway**.
             3. The app opens once, then lives in the system tray. Right-click the
-               tray icon for **Open**, **Health Check**, **Start on Login**, or **Quit**.
+               tray icon for **Open**, **Health Check**, **Check for Updates**,
+               **Start on Login**, or **Quit**.
+
+            After this, you do not need to come back here: **Settings -> Updates**
+            downloads a new release, verifies its checksum, and restarts the app
+            onto it.
 
             Your data is stored in `%LOCALAPPDATA%\AppTracker`. Back it up from
             **Settings -> Backup** before reinstalling: the `secret.key` in that

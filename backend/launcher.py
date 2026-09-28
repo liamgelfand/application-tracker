@@ -283,6 +283,54 @@ def _disable_startup() -> None:
     logger.info("Start-on-login disabled.")
 
 
+def _apply_pending_update(port: int) -> bool:
+    """Install a download staged by a previous session, then hand off and exit.
+
+    Windows keeps the running .exe locked, so even at startup we cannot
+    overwrite ourselves — a detached helper waits for this process to exit,
+    swaps the binary and relaunches it. True means "we are handing off".
+    """
+    if not getattr(sys, "frozen", False):
+        return False
+    try:
+        from app.services import updater
+    except Exception:  # noqa: BLE001 - never block startup on the updater
+        logger.exception("Could not load the updater")
+        return False
+
+    staged = updater.find_staged()
+    if staged is None:
+        return False
+    version, path = staged
+
+    # A swap that keeps failing must not turn into a relaunch loop that never
+    # reaches the tray. Give up on the staged file after a few tries.
+    attempts_file = path.with_suffix(".attempts")
+    attempts = 0
+    try:
+        attempts = int(attempts_file.read_text(encoding="ascii").strip() or 0)
+    except (OSError, ValueError):
+        pass
+    if attempts >= 3:
+        logger.error(
+            "Giving up on staged update %s after %s attempts; discarding it.",
+            version, attempts,
+        )
+        path.unlink(missing_ok=True)
+        attempts_file.unlink(missing_ok=True)
+        return False
+    try:
+        attempts_file.write_text(str(attempts + 1), encoding="ascii")
+    except OSError:
+        pass
+
+    logger.info("Installing staged update %s…", version)
+    if updater.apply_staged_update(port, staged=path):
+        return True
+    attempts_file.unlink(missing_ok=True)
+    return False
+
+
 def _migrate_windows_startup_if_needed(port: int) -> None:
     """Replace legacy AppTracker.bat (console flash) with silent .vbs."""
     if platform.system() != "Windows":
@@ -356,6 +404,8 @@ def main() -> None:
 
     port = args.port
     url = f"http://127.0.0.1:{port}"
+    # The update helper needs to relaunch us on the same port.
+    os.environ["APPTRACKER_PORT"] = str(port)
 
     # Starting twice used to die on "address already in use" and leave a tray
     # icon that reported a server it didn't own. Hand off to the live one.
@@ -369,6 +419,9 @@ def main() -> None:
                 "different port with --port, e.g. --port 8010.",
                 port,
             )
+        return
+
+    if _apply_pending_update(port):
         return
 
     _migrate_windows_startup_if_needed(port)
@@ -427,6 +480,28 @@ def main() -> None:
         server.stop()
         _icon.stop()
 
+    def on_check_updates(_icon, _item) -> None:
+        try:
+            from app.services import updater as _u
+
+            info = _u.check_for_update()
+            if info.update_available:
+                _icon.notify(
+                    f"Version {info.latest_version} is available. Open Settings → "
+                    "Updates to install it.",
+                    "AppTracker — update available",
+                )
+            else:
+                _icon.notify(
+                    info.reason or "You are up to date.", "AppTracker — no update"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Update check failed")
+            try:
+                _icon.notify(str(exc), "AppTracker — update check failed")
+            except Exception:
+                pass
+
     def on_health(_icon, _item) -> None:
         import json
         import urllib.request
@@ -468,12 +543,26 @@ def main() -> None:
     menu = pystray.Menu(
         pystray.MenuItem("Open AppTracker", on_open, default=True),
         pystray.MenuItem("Health Check", on_health),
+        pystray.MenuItem("Check for Updates", on_check_updates),
         pystray.MenuItem(startup_label, on_toggle_startup),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", on_quit),
     )
 
     icon = pystray.Icon("AppTracker", icon_image, "AppTracker", menu)
+
+    def quit_for_update() -> None:
+        """Shut down on the updater's behalf — only we hold the tray handle."""
+        server.stop()
+        icon.stop()
+
+    try:
+        from app.services import updater as _updater
+
+        _updater.register_quit_hook(quit_for_update)
+    except Exception:  # noqa: BLE001 - the tray must still come up
+        logger.exception("Could not register the updater quit hook")
+
     logger.info("Tray ready. Server healthy=%s url=%s", healthy, url)
     icon.run()
 

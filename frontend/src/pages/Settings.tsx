@@ -339,6 +339,128 @@ function NotificationToggle() {
   );
 }
 
+function UpdatesCard() {
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const { data: status, refetch } = useQuery({
+    queryKey: ["updateStatus"],
+    queryFn: () => api.getUpdateStatus(),
+    // Follow a download to completion without the user having to refresh.
+    refetchInterval: (query) => (query.state.data?.busy ? 1000 : false),
+  });
+
+  const check = useMutation({
+    mutationFn: () => api.checkForUpdate(),
+    onSuccess: () => {
+      setError(null);
+      refetch();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+  const download = useMutation({
+    mutationFn: () => api.downloadUpdate(),
+    onSuccess: () => {
+      setError(null);
+      refetch();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+  const install = useMutation({
+    mutationFn: () => api.installUpdate(),
+    onSuccess: (r) => {
+      setError(null);
+      setNote(`${r.message} Reopen it from the tray in a few seconds.`);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const staged = status?.staged_version ?? null;
+  const busy = status?.busy ?? false;
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div className="flex-between" style={{ marginBottom: 14 }}>
+        <div>
+          <strong>Updates</strong>
+          <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
+            Version {status?.current_version ?? "—"}
+            {status?.latest_version && status.latest_version !== status.current_version
+              ? ` · latest ${status.latest_version}`
+              : ""}
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {staged ? (
+            <button
+              className="btn-primary"
+              disabled={install.isPending}
+              onClick={() => {
+                if (
+                  confirm(
+                    `AppTracker will close and reopen on version ${staged}. Your ` +
+                      "data is untouched. Continue?"
+                  )
+                )
+                  install.mutate();
+              }}
+            >
+              {install.isPending ? "Restarting..." : `Restart & install ${staged}`}
+            </button>
+          ) : status?.update_available ? (
+            <button
+              className="btn-primary"
+              disabled={busy || download.isPending}
+              onClick={() => download.mutate()}
+            >
+              {busy ? "Downloading..." : `Download ${status.latest_version}`}
+            </button>
+          ) : null}
+          <button
+            className="btn-secondary"
+            disabled={busy || check.isPending}
+            onClick={() => check.mutate()}
+          >
+            {check.isPending ? "Checking..." : "Check now"}
+          </button>
+        </div>
+      </div>
+
+      {busy && (
+        <div className="muted" style={{ fontSize: 13 }}>
+          {status?.message}
+          {status?.phase === "downloading" && status.percent > 0
+            ? ` — ${status.percent}%`
+            : ""}
+        </div>
+      )}
+
+      {!busy && status && !status.supported && (
+        <div className="muted" style={{ fontSize: 13 }}>
+          {status.reason}
+        </div>
+      )}
+
+      {!busy && status?.supported && !staged && !status.update_available && (
+        <div className="muted" style={{ fontSize: 13 }}>
+          {status.reason ?? "Check for a newer release when you want one."}
+        </div>
+      )}
+
+      {note && <div className="alert alert-success">{note}</div>}
+      {(error || status?.error) && (
+        <div className="alert alert-error">
+          {error ?? status?.error}{" "}
+          <a href={status?.release_url} target="_blank" rel="noreferrer">
+            Download it manually
+          </a>
+          .
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BackupCard() {
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -844,6 +966,7 @@ export default function Settings() {
         </div>
       </div>
 
+      <UpdatesCard />
       <BackupCard />
 
       {showProviderModal && (
