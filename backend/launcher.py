@@ -319,12 +319,16 @@ class _ServerThread(threading.Thread):
 
             # pythonw has sys.stdout=None; uvicorn's default ColorFormatter
             # crashes on stdout.isatty() unless use_colors is forced off.
+            # log_config=None so uvicorn propagates to the root logger instead
+            # of installing its own stderr handlers. A windowed build has no
+            # stderr, which previously made 500s and tracebacks invisible.
             config = uvicorn.Config(
                 "app.main:app",
                 host="127.0.0.1",
                 port=self.port,
                 log_level="info",
                 use_colors=False,
+                log_config=None,
             )
             self._server = uvicorn.Server(config)
             self._server.run()

@@ -8,6 +8,8 @@ Build from the repo root:
 """
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
 # SPECPATH is the directory holding this file, but PyInstaller has reported it
 # differently across versions — locate the backend directory by its contents.
 _spec_dir = Path(SPECPATH).resolve()
@@ -31,6 +33,20 @@ if not FRONTEND_DIST.is_dir():
 datas = [(str(FRONTEND_DIST), "frontend/dist")]
 if ICON.exists():
     datas.append((str(ICON), "assets"))
+
+# litellm reads model_prices_and_context_window_backup.json at import. Without
+# it the packaged app re-downloads the pricing map from GitHub on every call,
+# which turns a network hiccup into a stalled inbox sync.
+datas += collect_data_files("litellm")
+
+# tiktoken resolves its encodings through importlib at runtime, so PyInstaller
+# cannot see tiktoken_ext.openai_public or tiktoken.load by static analysis.
+# Missing them makes `import litellm` fail in the packaged app only.
+tiktoken_imports = (
+    collect_submodules("tiktoken")
+    + collect_submodules("tiktoken_ext")
+    + ["tiktoken_ext.openai_public", "tiktoken.load", "tiktoken.registry"]
+)
 
 a = Analysis(
     [str(BACKEND / "launcher.py")],
@@ -56,6 +72,7 @@ a = Analysis(
         "app.api.parse",
         "app.api.settings",
         "app.api.suggestions",
+        *tiktoken_imports,
     ],
     hookspath=[],
     hooksconfig={},

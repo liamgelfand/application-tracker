@@ -526,7 +526,11 @@ export default function Settings() {
 
       {(syncProgress?.running || syncProgress?.phase === "done" || syncProgress?.phase === "error") && (
         <div
-          className={`alert ${syncProgress.phase === "error" ? "alert-error" : "alert-info"}`}
+          className={`alert ${
+            syncProgress.phase === "error" || syncProgress.stalled
+              ? "alert-error"
+              : "alert-info"
+          }`}
           style={{ marginBottom: 16 }}
         >
           {syncProgress.running
@@ -536,6 +540,13 @@ export default function Settings() {
             <span className="muted" style={{ marginLeft: 8 }}>
               ({syncProgress.current}/{syncProgress.total})
             </span>
+          )}
+          {syncProgress.stalled && (
+            <div style={{ marginTop: 6, fontSize: 13 }}>
+              No progress for {Math.floor(syncProgress.idle_seconds / 60)} min —
+              the AI provider is likely not responding. Test it under AI
+              Providers, then press Sync Now again.
+            </div>
           )}
         </div>
       )}

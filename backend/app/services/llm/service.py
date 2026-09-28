@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 
 from sqlalchemy import select
@@ -12,7 +13,34 @@ from ...models import LLMProvider
 
 DEFAULT_OLLAMA_BASE = "http://localhost:11434"
 
+# LiteLLM defaults to a 600s timeout. A single hung request would then stall an
+# inbox sync for ten minutes per email with no way to recover, so cap it well
+# below that. Local models are slower than hosted ones, hence the split.
+ANALYSIS_TIMEOUT_S = 90
+LOCAL_ANALYSIS_TIMEOUT_S = 180
+CONNECTION_TEST_TIMEOUT_S = 30
+
 _litellm_quieted = False
+
+
+def _import_litellm():
+    """Import litellm, turning any failure into an LLMError.
+
+    A packaged build can be missing litellm's dynamically imported extras
+    (tiktoken's encoding plugins), and a bare ImportError escaping this layer
+    would kill the inbox sync thread instead of failing one email.
+    """
+    # Must be set before the first import: litellm otherwise downloads its
+    # pricing map from GitHub at import time.
+    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    try:
+        import litellm
+    except Exception as exc:  # noqa: BLE001
+        raise LLMError(
+            f"The AI library failed to load ({exc}). This build may be "
+            "missing a dependency — please report it."
+        ) from exc
+    return litellm
 
 
 def _quiet_litellm() -> None:
@@ -20,13 +48,17 @@ def _quiet_litellm() -> None:
     global _litellm_quieted
     if _litellm_quieted:
         return
-    import litellm
+    litellm = _import_litellm()
 
     litellm.suppress_debug_info = True
     litellm.set_verbose = False
     for name in ("LiteLLM", "litellm", "httpx", "httpcore"):
         logging.getLogger(name).setLevel(logging.WARNING)
     _litellm_quieted = True
+
+
+def _timeout_for(provider: str) -> int:
+    return LOCAL_ANALYSIS_TIMEOUT_S if provider == "ollama" else ANALYSIS_TIMEOUT_S
 
 
 class LLMError(Exception):
@@ -50,7 +82,10 @@ def _model_string(provider: LLMProvider) -> str:
 
 
 def _completion_kwargs(provider: LLMProvider) -> dict:
-    kwargs: dict = {"model": _model_string(provider)}
+    kwargs: dict = {
+        "model": _model_string(provider),
+        "timeout": _timeout_for(provider.provider),
+    }
     api_key = decrypt(provider.api_key_encrypted)
     if api_key:
         kwargs["api_key"] = api_key
@@ -67,9 +102,10 @@ def _kwargs_from_fields(
     model: str,
     api_key: str | None,
     api_base: str | None,
+    timeout: int | None = None,
 ) -> dict:
     model_str = model if "/" in model else f"{provider}/{model}"
-    kwargs: dict = {"model": model_str}
+    kwargs: dict = {"model": model_str, "timeout": timeout or _timeout_for(provider)}
     if api_key:
         kwargs["api_key"] = api_key
     if provider == "ollama":
@@ -87,11 +123,17 @@ def test_llm_connection(
     api_base: str | None,
 ) -> tuple[bool, str]:
     """Send a tiny completion to verify provider + key + model."""
-    import litellm
-
-    _quiet_litellm()
+    try:
+        litellm = _import_litellm()
+        _quiet_litellm()
+    except LLMError as exc:
+        return False, str(exc)
     kwargs = _kwargs_from_fields(
-        provider=provider, model=model, api_key=api_key, api_base=api_base
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        api_base=api_base,
+        timeout=CONNECTION_TEST_TIMEOUT_S,
     )
     try:
         response = litellm.completion(
@@ -123,7 +165,7 @@ def complete(db: Session, messages: list[dict], *, temperature: float = 0.0) -> 
         db.rollback()
 
     # Imported lazily so the app can boot even if litellm has heavy imports.
-    import litellm
+    litellm = _import_litellm()
 
     _quiet_litellm()
     try:

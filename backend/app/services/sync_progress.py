@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any
+
+# A sync with no progress for this long is treated as wedged rather than
+# leaving the UI on a spinner forever.
+STALL_AFTER_S = 300
 
 _lock = threading.Lock()
 _state: dict[str, Any] = {
@@ -14,11 +19,32 @@ _state: dict[str, Any] = {
     "total": 0,
     "message": "",
 }
+_last_update: float = 0.0
+
+
+def _touch() -> None:
+    global _last_update
+    _last_update = time.monotonic()
 
 
 def get() -> dict[str, Any]:
     with _lock:
-        return dict(_state)
+        state = dict(_state)
+        if state["running"]:
+            idle_for = time.monotonic() - _last_update
+            state["stalled"] = idle_for > STALL_AFTER_S
+            state["idle_seconds"] = int(idle_for)
+        else:
+            state["stalled"] = False
+            state["idle_seconds"] = 0
+        return state
+
+
+def is_stalled() -> bool:
+    with _lock:
+        if not _state["running"]:
+            return False
+        return (time.monotonic() - _last_update) > STALL_AFTER_S
 
 
 def start(account_id: int, account_name: str, total: int) -> None:
@@ -34,6 +60,7 @@ def start(account_id: int, account_name: str, total: int) -> None:
                 "message": f"Fetched {total} email(s)…",
             }
         )
+        _touch()
 
 
 def tick(current: int, *, subject: str | None = None) -> None:
@@ -45,6 +72,7 @@ def tick(current: int, *, subject: str | None = None) -> None:
         if subject:
             label += f": {subject[:60]}"
         _state["message"] = label
+        _touch()
 
 
 def finish(message: str = "Sync complete") -> None:
@@ -56,6 +84,7 @@ def finish(message: str = "Sync complete") -> None:
                 "message": message,
             }
         )
+        _touch()
 
 
 def fail(message: str) -> None:
@@ -67,3 +96,18 @@ def fail(message: str) -> None:
                 "message": message,
             }
         )
+        _touch()
+
+
+def release() -> None:
+    """Clear a running flag left behind by a crashed sync."""
+    with _lock:
+        if _state["running"]:
+            _state.update(
+                {
+                    "running": False,
+                    "phase": "error",
+                    "message": "Sync stopped unexpectedly. Try Sync Now again.",
+                }
+            )
+            _touch()

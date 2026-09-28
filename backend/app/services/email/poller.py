@@ -29,7 +29,23 @@ def sync_account(
     *,
     fetch_limit: int = 25,
 ) -> dict:
-    """Fetch and analyze new mail for one account. Returns a small stats dict."""
+    """Fetch and analyze new mail for one account.
+
+    Always clears the progress flag on the way out, so an unexpected failure
+    can't leave the UI showing a sync that will never finish.
+    """
+    try:
+        return _sync_account(db, account, fetch_limit=fetch_limit)
+    finally:
+        sync_progress.release()
+
+
+def _sync_account(
+    db: Session,
+    account: EmailAccount,
+    *,
+    fetch_limit: int = 25,
+) -> dict:
     stats = {
         "fetched": 0,
         "job_related": 0,
@@ -118,6 +134,14 @@ def sync_account(
             logger.warning(
                 "LLM analysis failed for uid %s (%r): %s — will retry next sync",
                 msg.uid, msg.subject, exc,
+            )
+            llm_failed = True
+            analysis = {}
+        except Exception as exc:  # noqa: BLE001
+            # One malformed email must not take down the sync thread and leave
+            # the UI showing a sync that never finishes.
+            logger.exception(
+                "Unexpected error analyzing uid %s (%r): %s", msg.uid, msg.subject, exc
             )
             llm_failed = True
             analysis = {}

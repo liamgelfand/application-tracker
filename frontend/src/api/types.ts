@@ -137,6 +137,8 @@ export interface SyncProgress {
   current: number;
   total: number;
   message: string;
+  stalled: boolean;
+  idle_seconds: number;
 }
 
 export interface HealthStatus {
