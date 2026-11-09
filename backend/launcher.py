@@ -2,13 +2,18 @@
 Job Application Tracker — system tray launcher.
 
 Usage:
-    python launcher.py            # port 8000, or the next free one if busy
-    python launcher.py --port 9000  # prefer 9000 instead
+    python launcher.py               # port 8000, or the next free one if busy
+    python launcher.py --port 9000   # prefer 9000 instead
+    python launcher.py --background  # start in the tray without opening the app (login)
 
 What it does:
   1. Builds the frontend if frontend/dist is missing.
   2. Starts the FastAPI/uvicorn server in a background thread.
-  3. Shows a tray icon with Open / Start on Login / Quit options.
+  3. Opens the app in its own window (Windows; a browser tab elsewhere).
+  4. Shows a tray icon with Open / Start on Login / Quit options.
+
+The window is pywebview on Edge WebView2, run as its own process (`--window URL`) so it doesn't
+compete with the tray for the main thread. Closing it leaves the server and tray running.
 """
 from __future__ import annotations
 
@@ -61,6 +66,9 @@ LOG_DIR = _data_dir()
 LOG_FILE = LOG_DIR / "launcher.log"
 FIRST_RUN_MARKER = LOG_DIR / ".welcomed"
 INSTANCE_LOCK_FILE = LOG_DIR / "apptracker.lock"
+
+APP_NAME = "AppTracker"
+WINDOW_MUTEX = "Local\\apptracker-window"
 
 # Windows Startup entries
 _WIN_STARTUP = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup"
@@ -259,7 +267,7 @@ def _enable_startup(port: int) -> None:
             'Set sh = CreateObject("WScript.Shell")\r\n'
             f'sh.CurrentDirectory = "{work_dir}"\r\n'
             "WScript.Sleep 8000\r\n"
-            f'sh.Run """{exe}"" ""{script}"" --port {port}", 0, False\r\n'
+            f'sh.Run """{exe}"" ""{script}"" --port {port} --background", 0, False\r\n'
         )
         _WIN_STARTUP.mkdir(parents=True, exist_ok=True)
         _WIN_STARTUP_VBS.write_text(vbs, encoding="utf-8")
@@ -283,6 +291,7 @@ def _enable_startup(port: int) -> None:
     <string>{python}</string>
     <string>{script}</string>
     <string>--port</string><string>{port}</string>
+    <string>--background</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><false/>
@@ -303,7 +312,7 @@ def _enable_startup(port: int) -> None:
 Description=Job Application Tracker
 
 [Service]
-ExecStart={python} {script} --port {port}
+ExecStart={python} {script} --port {port} --background
 Restart=on-failure
 
 [Install]
@@ -380,12 +389,116 @@ def _apply_pending_update(port: int) -> bool:
 
 
 def _migrate_windows_startup_if_needed(port: int) -> None:
-    """Replace legacy AppTracker.bat (console flash) with silent .vbs."""
+    """Replace legacy Start-on-Login entries: AppTracker.bat (console flash), and a .vbs from before
+    --background, which would open the app window at every login."""
     if platform.system() != "Windows":
         return
     if _WIN_STARTUP_BAT.exists() and not _WIN_STARTUP_VBS.exists():
         logger.info("Migrating Start-on-Login from .bat to silent .vbs…")
         _enable_startup(port)
+    elif _WIN_STARTUP_VBS.exists():
+        try:
+            if "--background" not in _WIN_STARTUP_VBS.read_text(encoding="utf-8"):
+                logger.info("Updating Start-on-Login to start in the tray…")
+                _enable_startup(port)
+        except OSError:
+            logger.warning("Could not read %s", _WIN_STARTUP_VBS)
+
+
+# ---------------------------------------------------------------------------
+# App window
+# ---------------------------------------------------------------------------
+
+def _window_supported() -> bool:
+    if platform.system() != "Windows":
+        return False
+    import importlib.util
+
+    return importlib.util.find_spec("webview") is not None
+
+
+def _focus_window() -> bool:
+    """Restore and bring the open app window to the front. Matches only WinForms windows (what
+    pywebview creates), so an Explorer window on a folder named "AppTracker" isn't picked."""
+    if platform.system() != "Windows":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _lparam):
+        title, cls = ctypes.create_unicode_buffer(256), ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, title, 256)
+        user32.GetClassNameW(hwnd, cls, 256)
+        if title.value == APP_NAME and cls.value.startswith("WindowsForms"):
+            found.append(hwnd)
+            return False
+        return True
+
+    user32.EnumWindows(visit, 0)
+    if not found:
+        return False
+    if user32.IsIconic(found[0]):
+        user32.ShowWindow(found[0], 9)  # SW_RESTORE
+    user32.SetForegroundWindow(found[0])
+    return True
+
+
+def _window_command(url: str) -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--window", url]
+    python = Path(sys.executable)
+    pythonw = python.with_name("pythonw.exe")
+    return [str(pythonw if pythonw.exists() else python), str(HERE / "launcher.py"), "--window", url]
+
+
+def _show_app(url: str, *, here: bool = False) -> None:
+    """Bring the app window forward, opening it if needed. A browser tab where there is no window.
+
+    here=True runs the window in this process (when it has nothing else to do), which saves a
+    one-file build unpacking itself a second time. The tray process opens it as a child instead.
+    """
+    if _window_supported():
+        if _focus_window():
+            return
+        if here:
+            _run_window(url)
+            return
+        try:
+            from app.services.updater import _clean_env
+
+            # _clean_env: a one-file build's child must unpack its own copy, not reuse ours.
+            subprocess.Popen(_window_command(url), cwd=str(HERE), env=_clean_env(), close_fds=True)
+            return
+        except Exception:  # noqa: BLE001 - fall back to the browser
+            logger.exception("Could not open the app window; using the browser instead")
+    webbrowser.open(url)
+
+
+def _run_window(url: str) -> None:
+    """The `--window` process: the app in its own window until it is closed."""
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    # Held until this process exits. A second click while this one is opening just focuses it.
+    if kernel32.CreateMutexW(None, True, WINDOW_MUTEX) and ctypes.get_last_error() == 183:
+        _focus_window()
+        return
+    try:
+        import webview
+
+        icon = _icon_path()
+        # Links that open a new window (target=_blank) go to the default browser.
+        webview.create_window(APP_NAME, url, maximized=True, min_size=(900, 600), text_select=True)
+        webview.start(private_mode=False, storage_path=str(LOG_DIR / "webview"),
+                      icon=str(icon) if icon else None)
+    except Exception:  # noqa: BLE001
+        logger.exception("The app window failed; opening a browser tab instead")
+        webbrowser.open(url)
 
 
 # ---------------------------------------------------------------------------
@@ -502,7 +615,14 @@ def main() -> None:
         help="Preferred port; if it is busy the next free one (up to +100) is used",
     )
     parser.add_argument("--no-tray", action="store_true", help="Run without a tray icon (headless)")
+    parser.add_argument("--background", action="store_true",
+                        help="Start in the tray without opening the app (what Start on Login uses)")
+    parser.add_argument("--window", metavar="URL", help=argparse.SUPPRESS)  # internal: the app window
     args = parser.parse_args()
+
+    if args.window:
+        _run_window(args.window)
+        return
 
     # The preferred port, not the one we land on, is what Start on Login and
     # the update handoff should remember: a fallback is a one-off.
@@ -520,7 +640,8 @@ def main() -> None:
         running = _wait_for_other_launch(preferred_port, instance_lock, timeout_s=60.0)
         if running:
             logger.info("AppTracker is already running at %s — opening it.", running)
-            webbrowser.open(running)
+            if not args.background:
+                _show_app(running, here=True)
             return
         if not instance_lock.held:
             _alert(
@@ -537,7 +658,8 @@ def main() -> None:
     running = _find_running_instance(preferred_port)
     if running:
         logger.info("AppTracker is already running at %s — opening it.", running)
-        webbrowser.open(running)
+        if not args.background:
+            _show_app(running, here=True)
         return
 
     if _apply_pending_update(preferred_port):
@@ -559,15 +681,14 @@ def main() -> None:
         )
         if server.error:
             logger.error("Server thread error:\n%s", server.error)
-    elif not FIRST_RUN_MARKER.exists() or port != preferred_port:
-        # Subsequent launches stay silent in the tray; the first one needs to
-        # show the user something happened, and so does a move to a new port,
-        # or a bookmark to the old one would reach some other program.
+    elif not args.background or not FIRST_RUN_MARKER.exists():
+        # Opening the app shows it. A login start stays in the tray, except the very first
+        # time, which needs to show the user something happened.
         try:
             FIRST_RUN_MARKER.write_text("opened\n", encoding="utf-8")
         except OSError:
             pass
-        webbrowser.open(url)
+        _show_app(url)
 
     logger.info("AppTracker is serving on port %s: %s", port, url)
 
@@ -585,7 +706,7 @@ def main() -> None:
 
     def on_open(_icon, _item) -> None:
         if _wait_for_health(url, timeout_s=3.0):
-            webbrowser.open(url)
+            _show_app(url)
         else:
             logger.error(
                 "Cannot open app — server not responding at %s. See %s",
