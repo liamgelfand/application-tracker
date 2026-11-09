@@ -12,3 +12,4 @@ email-validator==2.2.0
 python-multipart==0.0.20
 pystray==0.19.5
 Pillow==11.1.0
+pywebview==6.2.1; sys_platform == "win32"

@@ -71,10 +71,10 @@ make setup   # install backend + frontend dependencies (run once)
 make app     # build the frontend, then launch the tray app
 ```
 
-The app sits in the system tray (it does not auto-open the browser).
-Right-click the tray icon to **Open**, run a **Health Check**, enable **Start on Login**, or **Quit**.
+The app opens in its own window (on Windows, using the Edge WebView2 runtime built into Windows 11; elsewhere, a browser tab) and keeps running in the system tray after you close it.
+Right-click the tray icon to **Open**, run a **Health Check**, enable **Start on Login**, or **Quit**. Start on Login starts AppTracker in the tray without opening the window (`--background`).
 
-The server listens on `http://127.0.0.1:8000`. If that port is busy, the launcher takes the next free port up to 8100, logs which one it chose, and opens the browser there. Pass `--port <number>` to `launcher.py` to start the search somewhere else. Launching again while AppTracker is running just opens the running copy.
+The server listens on `http://127.0.0.1:8000`. If that port is busy, the launcher takes the next free port up to 8100 and logs which one it chose. Pass `--port <number>` to `launcher.py` to start the search somewhere else. Launching again while AppTracker is running opens the running copy's window, or brings it to the front if it's already open.
 
 > **Windows note:** `make` isn't built in — install it with `winget install GnuWin32.Make` or use [Git Bash](https://gitforwindows.org/).  
 > Alternatively run the two commands manually:
@@ -153,8 +153,8 @@ Grab `AppTracker.exe` from the [latest release](../../releases/latest). It needs
 Python install. SmartScreen will warn that the publisher is unknown because the
 build isn't code-signed — choose **More info → Run anyway**.
 
-The app opens your browser once, then lives in the system tray. Right-click the
-tray icon for **Open**, **Health Check**, **Start on Login**, and **Quit**.
+The app opens in its own window and keeps running in the system tray when you close it.
+Right-click the tray icon for **Open**, **Health Check**, **Start on Login**, and **Quit**.
 
 Pushing a `v*` tag builds and drafts a release via
 [`.github/workflows/release.yml`](.github/workflows/release.yml):
