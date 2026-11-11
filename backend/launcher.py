@@ -69,6 +69,9 @@ INSTANCE_LOCK_FILE = LOG_DIR / "apptracker.lock"
 
 APP_NAME = "AppTracker"
 WINDOW_MUTEX = "Local\\apptracker-window"
+# Ties the window and the shortcuts together, so the taskbar shows and pins the window as AppTracker
+# with its icon, rather than as pythonw.exe with Python's.
+APP_USER_MODEL_ID = "LiamGelfand.AppTracker"
 
 # Windows Startup entries
 _WIN_STARTUP = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup"
@@ -478,10 +481,63 @@ def _show_app(url: str, *, here: bool = False) -> None:
     webbrowser.open(url)
 
 
+def _set_app_id(target: str | int) -> None:
+    """Set APP_USER_MODEL_ID on a shortcut (its path) or a window (its handle). Needs pywin32."""
+    import pythoncom
+    from win32com.propsys import propsys, pscon
+    from win32com.shell import shellcon
+
+    if isinstance(target, str):
+        store = propsys.SHGetPropertyStoreFromParsingName(target, None, shellcon.GPS_READWRITE, propsys.IID_IPropertyStore)
+    else:
+        store = propsys.SHGetPropertyStoreForWindow(target, propsys.IID_IPropertyStore)
+    store.SetValue(pscon.PKEY_AppUserModel_ID, propsys.PROPVARIANTType(APP_USER_MODEL_ID, pythoncom.VT_LPWSTR))
+    if isinstance(target, str):
+        store.Commit()
+
+
+def _tag_window(window) -> None:
+    try:
+        _set_app_id(window.native.Handle.ToInt64())
+    except Exception:  # noqa: BLE001 - the process-level id still groups the window
+        logger.exception("Could not tag the app window with its AppUserModelID")
+
+
+def install_shortcuts() -> list[str]:
+    """Create the Desktop and Start menu shortcuts, tagged with the window's AppUserModelID."""
+    if platform.system() != "Windows":
+        raise SystemExit("Shortcuts are only set up automatically on Windows.")
+    from win32com.client import Dispatch
+
+    if getattr(sys, "frozen", False):
+        target, arguments = sys.executable, ""
+    else:
+        python = Path(sys.executable)
+        pythonw = python.with_name("pythonw.exe")
+        target, arguments = str(pythonw if pythonw.exists() else python), f'"{HERE / "launcher.py"}"'
+    icon = _icon_path()
+    shell = Dispatch("WScript.Shell")
+    paths = []
+    for folder in ("Desktop", "Programs"):
+        path = str(Path(shell.SpecialFolders(folder)) / f"{APP_NAME}.lnk")
+        link = shell.CreateShortcut(path)
+        link.TargetPath = target
+        link.Arguments = arguments
+        link.WorkingDirectory = str(HERE)
+        if icon:
+            link.IconLocation = f"{icon},0"
+        link.Description = f"Open {APP_NAME}"
+        link.Save()
+        _set_app_id(path)
+        paths.append(path)
+    return paths
+
+
 def _run_window(url: str) -> None:
     """The `--window` process: the app in its own window until it is closed."""
     import ctypes
 
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateMutexW.restype = ctypes.c_void_p
     # Held until this process exits. A second click while this one is opening just focuses it.
@@ -493,7 +549,8 @@ def _run_window(url: str) -> None:
 
         icon = _icon_path()
         # Links that open a new window (target=_blank) go to the default browser.
-        webview.create_window(APP_NAME, url, maximized=True, min_size=(900, 600), text_select=True)
+        window = webview.create_window(APP_NAME, url, maximized=True, min_size=(900, 600), text_select=True)
+        window.events.shown += lambda: _tag_window(window)
         webview.start(private_mode=False, storage_path=str(LOG_DIR / "webview"),
                       icon=str(icon) if icon else None)
     except Exception:  # noqa: BLE001
@@ -617,8 +674,15 @@ def main() -> None:
     parser.add_argument("--no-tray", action="store_true", help="Run without a tray icon (headless)")
     parser.add_argument("--background", action="store_true",
                         help="Start in the tray without opening the app (what Start on Login uses)")
+    parser.add_argument("--install-shortcut", action="store_true",
+                        help="Create Desktop and Start menu shortcuts with the app's icon (Windows)")
     parser.add_argument("--window", metavar="URL", help=argparse.SUPPRESS)  # internal: the app window
     args = parser.parse_args()
+
+    if args.install_shortcut:
+        for path in install_shortcuts():
+            print(f"Created {path}")
+        return
 
     if args.window:
         _run_window(args.window)
