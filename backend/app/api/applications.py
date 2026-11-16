@@ -11,6 +11,7 @@ from fastapi.responses import Response
 from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from ..db import get_db
 from ..models import (
@@ -295,9 +296,25 @@ def list_follow_up_reminders(db: Session = Depends(get_db)) -> list[Application]
             continue
         if updated.tzinfo is None:
             updated = updated.replace(tzinfo=timezone.utc)
-        if updated <= cutoff:
-            due.append(app)
+        if updated > cutoff:
+            continue
+        if app.follow_up_dismissed_at == app.updated_at:
+            continue
+        due.append(app)
     return due
+
+
+@router.post("/{app_id}/dismiss-follow-up", response_model=MessageOut)
+def dismiss_follow_up(app_id: int, db: Session = Depends(get_db)) -> MessageOut:
+    """Hide this application's follow-up reminder until it changes again."""
+    app = db.get(Application, app_id)
+    if app is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    app.follow_up_dismissed_at = app.updated_at
+    # Re-assign updated_at so the onupdate hook doesn't bump it and undo the dismissal.
+    flag_modified(app, "updated_at")
+    db.commit()
+    return MessageOut(message="Follow-up dismissed")
 
 
 def _title_overlap(a: str, b: str) -> float:

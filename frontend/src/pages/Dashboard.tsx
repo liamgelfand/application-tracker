@@ -309,6 +309,23 @@ export default function Dashboard() {
   const [mergePick, setMergePick] = useState<number[]>([]);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  const { data: emailAccounts = [] } = useQuery({
+    queryKey: ["emailAccounts"],
+    queryFn: () => api.listEmailAccounts(),
+  });
+  const syncAll = useMutation({
+    mutationFn: async () => {
+      for (const a of emailAccounts.filter((x) => x.active)) {
+        await api.syncEmailAccount(a.id);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["emailAccounts"] });
+      queryClient.invalidateQueries({ queryKey: ["suggestions"] });
+      queryClient.invalidateQueries({ queryKey: ["applications"] });
+    },
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
@@ -455,6 +472,16 @@ export default function Dashboard() {
             justifyContent: "flex-end",
           }}
         >
+          {emailAccounts.some((a) => a.active) && (
+            <button
+              className="btn-secondary"
+              disabled={syncAll.isPending}
+              onClick={() => syncAll.mutate()}
+              title={syncAll.error ? (syncAll.error as Error).message : undefined}
+            >
+              {syncAll.isPending ? "Syncing..." : "Sync Now"}
+            </button>
+          )}
           <a className="btn-secondary" href={api.exportUrl("csv")}>
             Export CSV
           </a>

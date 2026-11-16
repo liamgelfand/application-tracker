@@ -59,6 +59,11 @@ def _migrate_sqlite_columns() -> None:
                 "ALTER TABLE applications ADD COLUMN job_id VARCHAR(128)"
             )
 
+        if "follow_up_dismissed_at" not in cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE applications ADD COLUMN follow_up_dismissed_at DATETIME"
+            )
+
         rows = conn.exec_driver_sql("PRAGMA table_info(suggestions)").fetchall()
         cols = {r[1] for r in rows}
         if "email_date" not in cols:
