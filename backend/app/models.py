@@ -75,6 +75,11 @@ class Application(Base):
     # at the same company.
     job_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     date_applied: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Snapshot of updated_at when the user dismissed the follow-up reminder. The
+    # reminder stays hidden until the application changes again.
+    follow_up_dismissed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 

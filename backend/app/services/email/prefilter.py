@@ -96,6 +96,7 @@ _JOB_PLATFORM_DOMAINS: frozenset[str] = frozenset(
         "ashbyhq.com",
         "ripplematching.com",
         "wellfound.com",
+        "ats.rippling.com",   # Rippling's applicant-tracking mail (rippling.com itself is payroll)
     }
 )
 
@@ -164,6 +165,10 @@ def is_blocked(sender: str) -> bool:
     for jp in _JOB_PLATFORM_DOMAINS:
         if domain == jp or domain.endswith("." + jp):
             return False
+
+    # ADP sends payroll mail, but its recruiting product mails from jobs+<id>@adp.com.
+    if domain == "adp.com" and re.search(r"<?jobs[+@]", sender.lower()):
+        return False
 
     # Block by domain.
     if domain in _BLOCKED_DOMAINS:

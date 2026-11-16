@@ -38,6 +38,11 @@ export default function FollowUps() {
     onSuccess: invalidate,
   });
 
+  const dismissOne = useMutation({
+    mutationFn: (id: number) => api.dismissFollowUp(id),
+    onSuccess: invalidate,
+  });
+
   const ghostAll = useMutation({
     mutationFn: async (apps: Application[]) => {
       for (const app of apps) {
@@ -120,7 +125,19 @@ export default function FollowUps() {
                     {new Date(app.updated_at).toLocaleDateString()}
                   </td>
                   <td className="muted">{daysSince(app.updated_at)} days</td>
-                  <td style={{ textAlign: "right" }}>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button
+                      className="btn-secondary"
+                      style={{ marginRight: 6 }}
+                      disabled={dismissOne.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dismissOne.mutate(app.id);
+                      }}
+                      title="Hide this reminder until the application changes"
+                    >
+                      Dismiss
+                    </button>
                     <button
                       className="btn-secondary"
                       disabled={ghostOne.isPending}

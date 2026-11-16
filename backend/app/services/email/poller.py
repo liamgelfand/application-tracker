@@ -22,6 +22,9 @@ logger = logging.getLogger("tracker.poller")
 # through the UID window while Ollama/API is down.
 _MAX_LLM_FAILURES = 2
 
+# Upper bound on back-to-back batches in one sync (25 mails each).
+_MAX_DRAIN_BATCHES = 40
+
 
 def sync_account(
     db: Session,
@@ -35,7 +38,28 @@ def sync_account(
     can't leave the UI showing a sync that will never finish.
     """
     try:
-        return _sync_account(db, account, fetch_limit=fetch_limit)
+        total = _sync_account(db, account, fetch_limit=fetch_limit)
+        # A full batch means more mail is waiting; keep draining until caught up.
+        for _ in range(_MAX_DRAIN_BATCHES):
+            if (
+                total.get("aborted")
+                or total.get("skipped")
+                or total["fetched"] < fetch_limit
+            ):
+                break
+            before = account.last_seen_uid
+            batch = _sync_account(db, account, fetch_limit=fetch_limit)
+            for key in (
+                "fetched", "job_related", "suggestions", "applied",
+                "low_confidence", "llm_failures",
+            ):
+                total[key] += batch[key]
+            total["aborted"] = batch["aborted"]
+            if batch.get("skipped"):
+                total["skipped"] = batch["skipped"]
+            if account.last_seen_uid == before:
+                break
+        return total
     finally:
         sync_progress.release()
 

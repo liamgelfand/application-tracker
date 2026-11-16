@@ -73,6 +73,10 @@ export const api = {
       body: JSON.stringify({ source_id: sourceId, target_id: targetId }),
     }),
   listReminders: () => request<Application[]>("/applications/reminders"),
+  dismissFollowUp: (id: number) =>
+    request<{ message: string }>(`/applications/${id}/dismiss-follow-up`, {
+      method: "POST",
+    }),
   exportUrl: (format: "csv" | "json") =>
     `${BASE}/applications/export?format=${format}`,
   importApplications: async (file: File) => {

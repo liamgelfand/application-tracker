@@ -137,11 +137,14 @@ def fetch_new_emails(
             return [], last_seen_uid
 
         uids = [int(x) for x in data[0].split()]
-        # When seeding (no last_seen_uid), only take the most recent `limit`.
-        if last_seen_uid is None and len(uids) > limit:
+        if last_seen_uid is None:
+            # First sync: seed from the most recent mail only.
             uids = uids[-limit:]
         else:
-            uids = uids[-limit:] if len(uids) > limit else uids
+            # Take the OLDEST unseen mail. The caller advances the cursor past
+            # whatever we return, so taking the newest would silently skip
+            # everything in between whenever more than `limit` mails arrived.
+            uids = uids[:limit]
 
         for uid in uids:
             if last_seen_uid is not None and uid <= last_seen_uid:

@@ -65,3 +65,25 @@ def test_application_crud_and_timeline(client):
 
 def test_get_missing_application_returns_404(client):
     assert client.get("/api/applications/9999").status_code == 404
+
+
+def test_dismissed_follow_up_stays_hidden_until_app_changes(client):
+    from datetime import datetime, timedelta
+
+    from app.db import SessionLocal
+    from app.models import Application, ApplicationStatus
+
+    db = SessionLocal()
+    try:
+        app = Application(company="Acme", title="Dev", status=ApplicationStatus.applied)
+        db.add(app)
+        db.commit()
+        app.updated_at = datetime.utcnow() - timedelta(days=30)
+        db.commit()
+        app_id = app.id
+    finally:
+        db.close()
+
+    assert [a["id"] for a in client.get("/api/applications/reminders").json()] == [app_id]
+    assert client.post(f"/api/applications/{app_id}/dismiss-follow-up").status_code == 200
+    assert client.get("/api/applications/reminders").json() == []
